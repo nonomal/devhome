@@ -24,6 +24,8 @@ public class AddWidgetDialog : PageDialog<DashboardPage>
 
     private WindowsElement CPUUsageNavigationItem => Driver.FindElementByAccessibilityId(GetWidgetNavigationItemId("System_CPUUsage"));
 
+    private WindowsElement HyperVNavigationItem => Driver.FindElementByAccessibilityId(GetWidgetNavigationItemId("HyperV"));
+
     private WindowsElement PinButton => Driver.FindElementByAccessibilityId("PinButton");
 
     public AddWidgetDialog(WindowsDriver<WindowsElement> driver, DashboardPage dashboardPage)
@@ -38,6 +40,8 @@ public class AddWidgetDialog : PageDialog<DashboardPage>
     public DashboardPage.WidgetControl AddGPUUsageWidget() => QuickAddWidget(GPUUsageNavigationItem, "GPU");
 
     public DashboardPage.WidgetControl AddCPUUsageWidget() => QuickAddWidget(CPUUsageNavigationItem, "CPU");
+
+    public DashboardPage.WidgetControl AddHyperVWidget() => QuickAddWidget(HyperVNavigationItem, "HyperV");
 
     public DashboardPage.WidgetControl AddSSHWidget(string configFilePath)
     {
