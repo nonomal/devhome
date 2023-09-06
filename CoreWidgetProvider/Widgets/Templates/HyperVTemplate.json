@@ -1,0 +1,43 @@
+{
+    "type": "AdaptiveCard",
+    "body": [
+        {
+            "type": "TextBlock",
+            "isSubtle": true,
+            "text": "%HyperV_Widget_Template/VMs%"
+        },
+        {
+            "type": "Container",
+            "$data": "${items}",
+            "items": [{
+                    "type": "ColumnSet",
+                    "columns": [
+                        {
+                            "type": "Column",
+                            "items": [
+                                {
+                                    "type": "TextBlock",
+                                    "text": "${name}"
+                                }
+                            ],
+                            "width": "auto"
+                        },
+                        {
+                            "type": "Column",
+                            "spacing": "Medium",
+                            "items": [
+                                {
+                                    "type": "TextBlock",
+                                    "text": "${state}"
+                                }
+                            ],
+                            "width": "stretch"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+    "version": "1.5"
+}
