@@ -18,7 +18,12 @@ public sealed partial class MainWindow : WindowEx
     {
         InitializeComponent();
 
+#if CANARY_BUILD
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets/DevHome_Canary.ico"));
+#else
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets/DevHome.ico"));
+#endif
+
         Content = null;
         Title = Application.Current.GetService<IAppInfoService>().GetAppNameLocalized();
         mainWindowCreated = DateTime.UtcNow;

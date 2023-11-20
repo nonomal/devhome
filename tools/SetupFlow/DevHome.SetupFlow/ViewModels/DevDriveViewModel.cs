@@ -37,9 +37,14 @@ public partial class DevDriveViewModel : ObservableObject, IDevDriveWindowViewMo
     private readonly IDevDriveManager _devDriveManager;
     private readonly IHost _host;
     private readonly string _localizedBrowseButtonText;
-    private readonly string _devHomeIconPath = "Assets/DevHome.ico";
     private readonly Dictionary<ByteUnit, string> _byteUnitList;
     private readonly Guid _activityId;
+
+#if CANARY_BUILD
+    private readonly string _devHomeIconPath = "Assets/DevHome_Canary.ico";
+#else
+    private readonly string _devHomeIconPath = "Assets/DevHome.ico";
+#endif
 
     private Models.DevDrive _concreteDevDrive = new ();
     private DevDriveTaskGroup _taskGroup;

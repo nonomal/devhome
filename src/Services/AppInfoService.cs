@@ -9,9 +9,14 @@ using DevHome.Helpers;
 using Windows.ApplicationModel;
 
 namespace DevHome.Services;
+
 public class AppInfoService : IAppInfoService
 {
+#if CANARY_BUILD
     public string IconPath { get; } = Path.Combine(AppContext.BaseDirectory, "Assets/DevHome.ico");
+#else
+    public string IconPath { get; } = Path.Combine(AppContext.BaseDirectory, "Assets/DevHome_Canary.ico");
+#endif
 
     public string GetAppNameLocalized()
     {
