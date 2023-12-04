@@ -5,6 +5,7 @@ using System;
 using DevHome.Common.Helpers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace DevHome.Common.Windows;
 
@@ -24,7 +25,16 @@ public sealed partial class WindowTitleBar : UserControl
 
     public IconElement Icon
     {
-        get => (IconElement)GetValue(IconProperty) ?? DefaultIconContent;
+#if CANARY_BUILD
+DefaultIconContent.
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets/DevHome_Canary.ico"));
+#else
+        get
+        {
+            DefaultIconContent.Source = new ImageSource(new Uri("ms-appx:///DevHome.SetupFlow/Assets/DarkCaution.png"));
+            return (IconElement)GetValue(IconProperty) ?? DefaultIconContent;
+        }
+#endif
         set => SetValue(IconProperty, value);
     }
 
