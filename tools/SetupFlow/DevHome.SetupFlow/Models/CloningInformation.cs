@@ -4,10 +4,10 @@
 using System;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
-using DevHome.SetupFlow.Common.Helpers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.Windows.DevHome.SDK;
+using Serilog;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 
@@ -19,6 +19,8 @@ namespace DevHome.SetupFlow.Models;
 /// </summary>
 public partial class CloningInformation : ObservableObject, IEquatable<CloningInformation>
 {
+    private readonly ILogger _log = Log.ForContext("SourceContext", nameof(CloningInformation));
+
     // Use git icons for the generic provider.
     private static readonly BitmapImage LightGit = new(new Uri("ms-appx:///DevHome.SetupFlow/Assets/GitLight.png"));
 
@@ -122,7 +124,7 @@ public partial class CloningInformation : ObservableObject, IEquatable<CloningIn
         }
         catch (Exception e)
         {
-            Log.Logger?.ReportError(_repositoryProviderDisplayName, e);
+            _log.Error(e, e.Message);
             RepositoryTypeIcon = GetGitIcon(theme);
             return;
         }
@@ -215,6 +217,14 @@ public partial class CloningInformation : ObservableObject, IEquatable<CloningIn
     }
 
     /// <summary>
+    /// Gets or sets the string that the narrator should say when the repo is selected in the config screen.
+    /// </summary>
+    public string RepoConfigAutomationName
+    {
+        get; set;
+    }
+
+    /// <summary>
     /// Gets or sets the name of the button that allows a user to remove the repository from being cloned.
     /// This name can't be static because each button name needs to be unique.  Because each name needs to be unique
     /// the name is stored here so it can be set at the time when a unique name can be made.
@@ -257,7 +267,7 @@ public partial class CloningInformation : ObservableObject, IEquatable<CloningIn
                 }
                 catch (Exception e)
                 {
-                    Log.Logger?.ReportError(_repositoryProviderDisplayName, e);
+                    _log.Error(e, e.Message);
                 }
             }
 

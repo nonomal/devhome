@@ -7,11 +7,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.WinUI.Helpers;
 using DevHome.Common.Services;
-using DevHome.SetupFlow.Common.Helpers;
-using DevHome.SetupFlow.Exceptions;
+using DevHome.Common.TelemetryEvents.SetupFlow;
+using DevHome.Services.WindowsPackageManager.Contracts;
+using DevHome.Services.WindowsPackageManager.Exceptions;
 using DevHome.SetupFlow.Services;
 using DevHome.Telemetry;
+using Serilog;
 
 namespace DevHome.SetupFlow.ViewModels;
 
@@ -35,7 +38,8 @@ public partial class SearchViewModel : ObservableObject
         ExceptionThrown,
     }
 
-    private readonly IWindowsPackageManager _wpm;
+    private readonly ILogger _log = Log.ForContext("SourceContext", nameof(SearchViewModel));
+    private readonly IWinGet _winget;
     private readonly ISetupFlowStringResource _stringResource;
     private readonly PackageProvider _packageProvider;
     private readonly IScreenReaderService _screenReaderService;
@@ -65,9 +69,13 @@ public partial class SearchViewModel : ObservableObject
     /// </summary>
     public string NoSearchResultsText => _stringResource.GetLocalized(StringResourceKey.NoSearchResultsFoundTitle, SearchText);
 
-    public SearchViewModel(IWindowsPackageManager wpm, ISetupFlowStringResource stringResource, PackageProvider packageProvider, IScreenReaderService screenReaderService)
+    public SearchViewModel(
+        IWinGet winget,
+        ISetupFlowStringResource stringResource,
+        PackageProvider packageProvider,
+        IScreenReaderService screenReaderService)
     {
-        _wpm = wpm;
+        _winget = winget;
         _stringResource = stringResource;
         _packageProvider = packageProvider;
         _screenReaderService = screenReaderService;
@@ -79,25 +87,24 @@ public partial class SearchViewModel : ObservableObject
     /// <param name="text">Text search query</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Search status and result</returns>
-    public async Task<(SearchResultStatus, List<PackageViewModel>)> SearchAsync(string text, CancellationToken cancellationToken)
+    public async Task<SearchResultStatus> SearchAsync(string text, CancellationToken cancellationToken)
     {
         // Skip search if text is empty
         if (string.IsNullOrWhiteSpace(text))
         {
-            return (SearchResultStatus.EmptySearchQuery, null);
+            return SearchResultStatus.EmptySearchQuery;
         }
 
         try
         {
             // Run the search on a separate (non-UI) thread to prevent lagging the UI.
-            Log.Logger?.ReportInfo(Log.Component.AppManagement, $"Running package search for query [{text}]");
-            TelemetryFactory.Get<ITelemetry>().LogCritical("Search_SerchingForApplication_Event");
-            var matches = await Task.Run(async () => await _wpm.SearchAsync(text, SearchResultLimit), cancellationToken);
+            _log.Information($"Running package search for query [{text}]");
+            var matches = await Task.Run(async () => await _winget.SearchAsync(text, SearchResultLimit), cancellationToken);
 
             // Don't update the UI if the operation was canceled
             if (cancellationToken.IsCancellationRequested)
             {
-                return (SearchResultStatus.Canceled, null);
+                return SearchResultStatus.Canceled;
             }
 
             // Update the UI only if the operation was successful
@@ -107,27 +114,29 @@ public partial class SearchViewModel : ObservableObject
             // Announce the results.
             if (ResultPackages.Count != 0)
             {
+                TelemetryFactory.Get<ITelemetry>().Log("Search_SearchingForApplication_Found_Event", LogLevel.Critical, new SearchEvent());
                 _screenReaderService.Announce(SearchCountText);
             }
             else
             {
+                TelemetryFactory.Get<ITelemetry>().Log("Search_SearchingForApplication_NotFound_Event", LogLevel.Critical, new SearchEvent());
                 _screenReaderService.Announce(NoSearchResultsText);
             }
 
-            return (SearchResultStatus.Ok, ResultPackages);
+            return SearchResultStatus.Ok;
         }
         catch (WindowsPackageManagerRecoveryException)
         {
-            return (SearchResultStatus.CatalogNotConnect, null);
+            return SearchResultStatus.CatalogNotConnect;
         }
         catch (OperationCanceledException)
         {
-            return (SearchResultStatus.Canceled, null);
+            return SearchResultStatus.Canceled;
         }
         catch (Exception e)
         {
-            Log.Logger?.ReportError(Log.Component.AppManagement, $"Search error.", e);
-            return (SearchResultStatus.ExceptionThrown, null);
+            _log.Error(e, $"Search error.");
+            return SearchResultStatus.ExceptionThrown;
         }
     }
 }

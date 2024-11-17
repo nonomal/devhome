@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using DevHome.SetupFlow.Common.Helpers;
+using DevHome.Services.WindowsPackageManager.Contracts;
+using DevHome.Services.WindowsPackageManager.Models;
 using DevHome.SetupFlow.Models;
+using Serilog;
 
 namespace DevHome.SetupFlow.Services;
 
@@ -15,16 +16,18 @@ namespace DevHome.SetupFlow.Services;
 /// </summary>
 public abstract class WinGetPackageDataSource
 {
+    private readonly ILogger _log = Log.ForContext("SourceContext", nameof(WinGetPackageDataSource));
+
     /// <summary>
     /// Gets the total number of package catalogs available in this data source
     /// </summary>
     public abstract int CatalogCount { get; }
 
-    protected IWindowsPackageManager WindowsPackageManager { get; }
+    protected IWinGet WinGet { get; }
 
-    public WinGetPackageDataSource(IWindowsPackageManager wpm)
+    public WinGetPackageDataSource(IWinGet winget)
     {
-        WindowsPackageManager = wpm;
+        WinGet = winget;
     }
 
     /// <summary>
@@ -51,11 +54,11 @@ public abstract class WinGetPackageDataSource
         // Skip search if package data source is empty
         if (!packageUris.Any())
         {
-            Log.Logger?.ReportWarn(Log.Component.AppManagement, $"{nameof(GetPackagesAsync)} received an empty list of items. Skipping search.");
+            _log.Warning($"{nameof(GetPackagesAsync)} received an empty list of items. Skipping search.");
             return result;
         }
 
         // Get packages from winget catalog
-        return await WindowsPackageManager.GetPackagesAsync(packageUris);
+        return await WinGet.GetPackagesAsync(packageUris);
     }
 }

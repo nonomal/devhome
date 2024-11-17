@@ -3,8 +3,6 @@
 
 using System.Diagnostics;
 
-using Microsoft.UI.Xaml.Controls;
-
 namespace DevHome.Test;
 
 /*
@@ -56,9 +54,9 @@ public class TestClass
     }
 
     [TestMethod]
-    public void TestExperimentHelpers()
+    public void TestExperimentHelpers_UnrecognizedKey_ReturnFalse()
     {
         Microsoft.Internal.Windows.DevHome.Helpers.Experimentation.Experiment experiment = new();
-        Assert.IsTrue(experiment.IsEnabled("Sample_FeatureStaging"));
+        Assert.IsFalse(experiment.IsEnabled("unknown_key"));
     }
 }

@@ -45,6 +45,9 @@ internal sealed class Tool
     [JsonPropertyName("viewModelFullName")]
     public string ViewModelFullName { get; set; }
 
+    [JsonPropertyName("iconFontFamily")]
+    public string IconFontFamily { get; set; } = "SymbolThemeFontFamily";
+
     [JsonPropertyName("icon")]
     public string Icon { get; set; }
 
@@ -60,8 +63,14 @@ internal sealed class ExperimentalFeatures
     [JsonPropertyName("enabledByDefault")]
     public bool EnabledByDefault { get; set; }
 
+    [JsonPropertyName("needsFeaturePresenceCheck")]
+    public bool NeedsFeaturePresenceCheck { get; set; }
+
     [JsonPropertyName("buildTypeOverrides")]
     public BuildTypeOverrides[] BuildTypeOverrides { get; set; }
+
+    [JsonPropertyName("openPage")]
+    public OpenPage OpenPage { get; set; }
 }
 
 internal sealed class BuildTypeOverrides
@@ -74,6 +83,15 @@ internal sealed class BuildTypeOverrides
 
     [JsonPropertyName("visible")]
     public bool Visible { get; set; }
+}
+
+internal sealed class OpenPage
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; }
+
+    [JsonPropertyName("parameter")]
+    public string Parameter { get; set; }
 }
 
 // Uses .NET's JSON source generator support for serializing / deserializing NavConfig to get some perf gains at startup.

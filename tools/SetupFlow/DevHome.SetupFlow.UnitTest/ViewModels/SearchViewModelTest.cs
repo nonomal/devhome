@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 using DevHome.Common.Extensions;
-using DevHome.SetupFlow.Exceptions;
-using DevHome.SetupFlow.Models;
+using DevHome.Services.WindowsPackageManager.Contracts;
+using DevHome.Services.WindowsPackageManager.Exceptions;
 using DevHome.SetupFlow.UnitTest.Helpers;
 using DevHome.SetupFlow.ViewModels;
 using Moq;
@@ -20,10 +20,9 @@ public class SearchViewModelTest : BaseSetupFlowTest
     public void Search_NullOrEmptyText_ReturnsEmptyStatusAndNull(string text)
     {
         var searchViewModel = TestHost!.GetService<SearchViewModel>();
-        var (status, packages) = searchViewModel.SearchAsync(text, new CancellationToken(canceled: false)).GetAwaiter().GetResult();
+        var status = searchViewModel.SearchAsync(text, new CancellationToken(canceled: false)).GetAwaiter().GetResult();
 
         Assert.AreEqual(SearchViewModel.SearchResultStatus.EmptySearchQuery, status);
-        Assert.IsNull(packages);
     }
 
     [TestMethod]
@@ -31,10 +30,9 @@ public class SearchViewModelTest : BaseSetupFlowTest
     {
         var searchViewModel = TestHost!.GetService<SearchViewModel>();
 
-        var (status, packages) = searchViewModel.SearchAsync("mock", new CancellationToken(canceled: true)).GetAwaiter().GetResult();
+        var status = searchViewModel.SearchAsync("mock", new CancellationToken(canceled: true)).GetAwaiter().GetResult();
 
         Assert.AreEqual(SearchViewModel.SearchResultStatus.Canceled, status);
-        Assert.IsNull(packages);
     }
 
     [TestMethod]
@@ -43,10 +41,9 @@ public class SearchViewModelTest : BaseSetupFlowTest
         WindowsPackageManager!.Setup(wpm => wpm.SearchAsync(It.IsAny<string>(), It.IsAny<uint>())).ThrowsAsync(new WindowsPackageManagerRecoveryException());
         var searchViewModel = TestHost!.GetService<SearchViewModel>();
 
-        var (status, packages) = searchViewModel.SearchAsync("mock", new CancellationToken(false)).GetAwaiter().GetResult();
+        var status = searchViewModel.SearchAsync("mock", new CancellationToken(false)).GetAwaiter().GetResult();
 
         Assert.AreEqual(SearchViewModel.SearchResultStatus.CatalogNotConnect, status);
-        Assert.IsNull(packages);
     }
 
     [TestMethod]
@@ -55,10 +52,9 @@ public class SearchViewModelTest : BaseSetupFlowTest
         WindowsPackageManager!.Setup(wpm => wpm.SearchAsync(It.IsAny<string>(), It.IsAny<uint>())).ThrowsAsync(new InvalidOperationException());
         var searchViewModel = TestHost!.GetService<SearchViewModel>();
 
-        var (status, packages) = searchViewModel.SearchAsync("mock", new CancellationToken(false)).GetAwaiter().GetResult();
+        var status = searchViewModel.SearchAsync("mock", new CancellationToken(false)).GetAwaiter().GetResult();
 
         Assert.AreEqual(SearchViewModel.SearchResultStatus.ExceptionThrown, status);
-        Assert.IsNull(packages);
     }
 
     [TestMethod]
@@ -71,9 +67,8 @@ public class SearchViewModelTest : BaseSetupFlowTest
         });
         var searchViewModel = TestHost!.GetService<SearchViewModel>();
 
-        var (status, packages) = searchViewModel.SearchAsync("mock", new CancellationToken(false)).GetAwaiter().GetResult();
+        var status = searchViewModel.SearchAsync("mock", new CancellationToken(false)).GetAwaiter().GetResult();
 
         Assert.AreEqual(SearchViewModel.SearchResultStatus.Ok, status);
-        Assert.AreEqual(1, packages.Count);
     }
 }

@@ -5,8 +5,8 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using COM;
-using CoreWidgetProvider.Helpers;
 using Microsoft.Windows.Widgets.Providers;
+using Serilog;
 using Windows.Win32;
 using Windows.Win32.System.Com;
 
@@ -14,7 +14,7 @@ namespace CoreWidgetProvider.Widgets;
 
 public sealed class WidgetServer : IDisposable
 {
-    private readonly HashSet<uint> registrationCookies = new();
+    private readonly HashSet<uint> _registrationCookies = new();
 
     [UnconditionalSuppressMessage(
         "ReflectionAnalysis",
@@ -23,9 +23,9 @@ public sealed class WidgetServer : IDisposable
     public void RegisterWidget<T>(Func<T> createWidget)
         where T : IWidgetProvider
     {
-        Log.Logger()?.ReportDebug($"Registering class object:");
-        Log.Logger()?.ReportDebug($"CLSID: {typeof(T).GUID:B}");
-        Log.Logger()?.ReportDebug($"Type: {typeof(T)}");
+        Log.Debug($"Registering class object:");
+        Log.Debug($"CLSID: {typeof(T).GUID:B}");
+        Log.Debug($"Type: {typeof(T)}");
 
         uint cookie;
         var clsid = typeof(T).GUID;
@@ -41,8 +41,8 @@ public sealed class WidgetServer : IDisposable
             Marshal.ThrowExceptionForHR(hr);
         }
 
-        registrationCookies.Add(cookie);
-        Log.Logger()?.ReportDebug($"Cookie: {cookie}");
+        _registrationCookies.Add(cookie);
+        Log.Debug($"Cookie: {cookie}");
         hr = PInvoke.CoResumeClassObjects();
         if (hr < 0)
         {
@@ -61,10 +61,10 @@ public sealed class WidgetServer : IDisposable
 
     public void Dispose()
     {
-        Log.Logger()?.ReportDebug($"Revoking class object registrations:");
-        foreach (var cookie in registrationCookies)
+        Log.Debug($"Revoking class object registrations:");
+        foreach (var cookie in _registrationCookies)
         {
-            Log.Logger()?.ReportDebug($"Cookie: {cookie}");
+            Log.Debug($"Cookie: {cookie}");
             var hr = PInvoke.CoRevokeClassObject(cookie);
             Debug.Assert(hr >= 0, $"CoRevokeClassObject failed ({hr:x}). Cookie: {cookie}");
         }

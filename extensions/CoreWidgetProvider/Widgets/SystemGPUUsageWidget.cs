@@ -13,18 +13,16 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
 {
     private static Dictionary<string, string> Templates { get; set; } = new();
 
-    private static readonly new string Name = nameof(SystemGPUUsageWidget);
+    private readonly DataManager _dataManager;
 
-    private readonly DataManager dataManager;
+    private readonly string _gpuActiveEngType = "3D";
 
-    private readonly string gpuActiveEngType = "3D";
-
-    private int gpuActiveIndex;
+    private int _gpuActiveIndex;
 
     public SystemGPUUsageWidget()
         : base()
     {
-        dataManager = new(DataType.GPU, UpdateWidget);
+        _dataManager = new(DataType.GPU, UpdateWidget);
     }
 
     private string SpeedToString(float cpuSpeed)
@@ -39,19 +37,19 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
 
     public override void LoadContentData()
     {
-        Log.Logger()?.ReportDebug(Name, ShortId, "Getting GPU Data");
+        Log.Debug("Getting GPU Data");
 
         try
         {
             var gpuData = new JsonObject();
 
-            var stats = dataManager.GetGPUStats();
-            var gpuName = stats.GetGPUName(gpuActiveIndex);
+            var stats = _dataManager.GetGPUStats();
+            var gpuName = stats.GetGPUName(_gpuActiveIndex);
 
-            gpuData.Add("gpuUsage", FloatToPercentString(stats.GetGPUUsage(gpuActiveIndex, gpuActiveEngType)));
+            gpuData.Add("gpuUsage", FloatToPercentString(stats.GetGPUUsage(_gpuActiveIndex, _gpuActiveEngType)));
             gpuData.Add("gpuName", gpuName);
-            gpuData.Add("gpuTemp", stats.GetGPUTemperature(gpuActiveIndex));
-            gpuData.Add("gpuGraphUrl", stats.CreateGPUImageUrl(gpuActiveIndex));
+            gpuData.Add("gpuTemp", stats.GetGPUTemperature(_gpuActiveIndex));
+            gpuData.Add("gpuGraphUrl", stats.CreateGPUImageUrl(_gpuActiveIndex));
             gpuData.Add("chartHeight", ChartHelper.ChartHeight + "px");
             gpuData.Add("chartWidth", ChartHelper.ChartWidth + "px");
 
@@ -60,7 +58,7 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
         }
         catch (Exception e)
         {
-            Log.Logger()?.ReportError(Name, ShortId, "Error retrieving data.", e);
+            Log.Error(e, "Error retrieving data.");
             var content = new JsonObject
             {
                 { "errorMessage", e.Message },
@@ -95,20 +93,20 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
 
     private void HandlePrevGPU(WidgetActionInvokedArgs args)
     {
-        gpuActiveIndex = dataManager.GetGPUStats().GetPrevGPUIndex(gpuActiveIndex);
+        _gpuActiveIndex = _dataManager.GetGPUStats().GetPrevGPUIndex(_gpuActiveIndex);
         UpdateWidget();
     }
 
     private void HandleNextGPU(WidgetActionInvokedArgs args)
     {
-        gpuActiveIndex = dataManager.GetGPUStats().GetNextGPUIndex(gpuActiveIndex);
+        _gpuActiveIndex = _dataManager.GetGPUStats().GetNextGPUIndex(_gpuActiveIndex);
         UpdateWidget();
     }
 
     public override void OnActionInvoked(WidgetActionInvokedArgs actionInvokedArgs)
     {
         var verb = GetWidgetActionForVerb(actionInvokedArgs.Verb);
-        Log.Logger()?.ReportDebug(Name, ShortId, $"ActionInvoked: {verb}");
+        Log.Debug($"ActionInvoked: {verb}");
 
         switch (verb)
         {
@@ -121,7 +119,7 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
                 break;
 
             case WidgetAction.Unknown:
-                Log.Logger()?.ReportError(Name, ShortId, $"Unknown verb: {actionInvokedArgs.Verb}");
+                Log.Error($"Unknown verb: {actionInvokedArgs.Verb}");
                 break;
         }
     }
@@ -135,7 +133,7 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
             LoadContentData();
         }
 
-        dataManager.Start();
+        _dataManager.Start();
 
         LogCurrentState();
         UpdateWidget();
@@ -143,7 +141,7 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
 
     protected override void SetInactive()
     {
-        dataManager.Stop();
+        _dataManager.Stop();
 
         ActivityState = WidgetActivityState.Inactive;
 
@@ -152,7 +150,7 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
 
     protected override void SetDeleted()
     {
-        dataManager.Stop();
+        _dataManager.Stop();
 
         SetState(string.Empty);
         ActivityState = WidgetActivityState.Unknown;
@@ -161,6 +159,6 @@ internal sealed class SystemGPUUsageWidget : CoreWidget, IDisposable
 
     public void Dispose()
     {
-        dataManager.Dispose();
+        _dataManager.Dispose();
     }
 }

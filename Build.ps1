@@ -26,7 +26,7 @@ Description:
 Options:
 
   -Platform <platform>
-      Only buil the selected platform(s)
+      Only build the selected platform(s)
       Example: -Platform x64
       Example: -Platform "x86,x64,arm64"
 
@@ -49,6 +49,23 @@ $env:sdk_version = build\Scripts\CreateBuildInfo.ps1 -Version $VersionOfSDK -IsS
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')
 
+function Write-XmlDocumentToFile {
+  param (
+    [System.Xml.XmlDocument]$xmlDocument,
+    [string]$filePath
+  )
+
+  $settings = New-Object System.Xml.XmlWriterSettings
+  $settings.Indent = $true
+  $settings.CheckCharacters = $false
+  $settings.NewLineChars = "`r`n"
+
+  $writer = [System.Xml.XmlWriter]::Create($filePath, $settings)
+  $xmlDocument.WriteTo($writer)
+  $writer.Flush()
+  $writer.Close()
+}
+
 if ($IsAzurePipelineBuild) {
   Copy-Item (Join-Path $env:Build_RootDirectory "build\nuget.config.internal") -Destination (Join-Path $env:Build_RootDirectory "nuget.config")
 }
@@ -58,6 +75,22 @@ $ErrorActionPreference = "Stop"
 if (($BuildStep -ieq "all") -Or ($BuildStep -ieq "sdk")) {
   foreach ($configuration in $env:Build_Configuration.Split(",")) {
     extensionsdk\BuildSDKHelper.ps1 -Configuration $configuration -VersionOfSDK $env:sdk_version -IsAzurePipelineBuild $IsAzurePipelineBuild -BypassWarning
+  }
+}
+
+if (($BuildStep -ieq "all") -Or ($BuildStep -ieq "DevSetupAgent") -Or ($BuildStep -ieq "fullMsix")) {
+  foreach ($configuration in $env:Build_Configuration.Split(",")) {
+    # We use x86 DevSetupAgent for x64 and x86 Dev Home build. Only need to build it once if we are building multiple platforms.
+    $builtX86 = $false
+    foreach ($platform in $env:Build_Platform.Split(",")) {
+      if ($platform -ieq "arm64") {
+        extensions\HyperVExtension\BuildDevSetupAgentHelper.ps1 -Platform $Platform -Configuration $configuration -VersionOfSDK $env:sdk_version -SDKNugetSource $SDKNugetSource -AzureBuildingBranch $AzureBuildingBranch -IsAzurePipelineBuild $IsAzurePipelineBuild -BypassWarning
+      }
+      elseif (-not $builtX86) {
+        extensions\HyperVExtension\BuildDevSetupAgentHelper.ps1 -Platform "x86" -Configuration $configuration -VersionOfSDK $env:sdk_version -SDKNugetSource $SDKNugetSource -AzureBuildingBranch $AzureBuildingBranch -IsAzurePipelineBuild $IsAzurePipelineBuild -BypassWarning
+        $builtX86 = $true
+      }
+    }
   }
 }
 
@@ -79,74 +112,44 @@ if (-not([string]::IsNullOrWhiteSpace($SDKNugetSource))) {
 . build\Scripts\CertSignAndInstall.ps1
 
 Try {
-  if (($BuildStep -ieq "all") -Or ($BuildStep -ieq "msix")) {
+  if (($BuildStep -ieq "all") -Or ($BuildStep -ieq "msix") -Or ($BuildStep -ieq "fullMsix")) {
+    # Update C++ version resources and header
+    $cppHeader = (Join-Path $env:Build_RootDirectory "build\cppversion\version.h")
+    $updatebinverpath = (Join-Path $env:Build_RootDirectory "build\scripts\update-binver.ps1")
+    & $updatebinverpath -TargetFile $cppHeader -BuildVersion $env:msix_version
+
     $buildRing = "Dev"
-    $newPackageName = $null
-    $newPackageDisplayName = $null
-    $newAppDisplayNameResource = $null
-    $newWidgetProviderDisplayName = $null
+    $appxmanifestPath = (Join-Path $env:Build_RootDirectory "src\Package-Dev.appxmanifest")
 
     if ($AzureBuildingBranch -ieq "release") {
       $buildRing = "Stable"
-      $newPackageName = "Microsoft.Windows.DevHome"
-      $newPackageDisplayName = "Dev Home (Preview)"
-      $newAppDisplayNameResource = "ms-resource:AppDisplayNameStable"
-      $newWidgetProviderDisplayName = "ms-resource:WidgetProviderDisplayNameStable"
+      $appxmanifestPath = (Join-Path $env:Build_RootDirectory "src\Package.appxmanifest")
     } elseif ($AzureBuildingBranch -ieq "staging") {
       $buildRing = "Canary"
-      $newPackageName = "Microsoft.Windows.DevHome.Canary"
-      $newPackageDisplayName = "Dev Home (Canary)"
-      $newAppDisplayNameResource = "ms-resource:AppDisplayNameCanary"
-      $newWidgetProviderDisplayName = "ms-resource:WidgetProviderDisplayNameCanary"
+      $appxmanifestPath = (Join-Path $env:Build_RootDirectory "src\Package-Can.appxmanifest")
     }
 
     [Reflection.Assembly]::LoadWithPartialName("System.Xml.Linq")
     $xIdentity = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/foundation/windows10}Identity");
-    $xProperties = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/foundation/windows10}Properties");
-    $xDisplayName = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/foundation/windows10}DisplayName");
-    $xApplications = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/foundation/windows10}Applications");
-    $xApplication = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/foundation/windows10}Application");
-    $uapVisualElements = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/uap/windows10}VisualElements");
-    $xExtensions = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/foundation/windows10}Extensions");
-    $uapExtension = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/uap/windows10/3}Extension");
-    $uapAppExtension = [System.Xml.Linq.XName]::Get("{http://schemas.microsoft.com/appx/manifest/uap/windows10/3}AppExtension");
 
     # Update the appxmanifest
-    $appxmanifestPath = (Join-Path $env:Build_RootDirectory "src\Package.appxmanifest")
     $appxmanifest = [System.Xml.Linq.XDocument]::Load($appxmanifestPath)
     $appxmanifest.Root.Element($xIdentity).Attribute("Version").Value = $env:msix_version
-    if (-not ([string]::IsNullOrEmpty($newPackageName))) {
-      $appxmanifest.Root.Element($xIdentity).Attribute("Name").Value = $newPackageName
-    } 
-    if (-not ([string]::IsNullOrEmpty($newPackageDisplayName))) {
-      $appxmanifest.Root.Element($xProperties).Element($xDisplayName).Value = $newPackageDisplayName
-    }
-    if (-not ([string]::IsNullOrEmpty($newAppDisplayNameResource))) {
-      $appxmanifest.Root.Element($xApplications).Element($xApplication).Element($uapVisualElements).Attribute("DisplayName").Value = $newAppDisplayNameResource
-      $extensions = $appxmanifest.Root.Element($xApplications).Element($xApplication).Element($xExtensions).Elements($uapExtension)
-      foreach ($extension in $extensions) {
-        if ($extension.Attribute("Category").Value -eq "windows.appExtension") {
-          $appExtension = $extension.Element($uapAppExtension)
-          switch ($appExtension.Attribute("Name").Value) {
-            "com.microsoft.devhome" {
-              $appExtension.Attribute("DisplayName").Value = $newAppDisplayNameResource
-            }
-            "com.microsoft.windows.widgets" {
-              $appExtension.Attribute("DisplayName").Value = $newWidgetProviderDisplayName
-            }
-          }
-        }
-      }
-    }
-    $appxmanifest.Save($appxmanifestPath)
+
+    Write-XmlDocumentToFile -xmlDocument $appxmanifest -filePath $appxmanifestPath
+
+    # This is needed for vcxproj
+    & $nugetPath restore
 
     foreach ($platform in $env:Build_Platform.Split(",")) {
       foreach ($configuration in $env:Build_Configuration.Split(",")) {
         $appxPackageDir = (Join-Path $env:Build_RootDirectory "AppxPackages\$configuration")
+        Write-Host "Building DevHome for EnvPlatform: $env:Build_Platform Platform: $platform Configuration: $configuration BundlePlatforms: $appxBundlePlatform Dir: $appxPackageDir Ring: $buildRing"
         $msbuildArgs = @(
             ("DevHome.sln"),
             ("/p:Platform="+$platform),
             ("/p:Configuration="+$configuration),
+            ("/p:Version="+$env:msix_version),
             ("/restore"),
             ("/binaryLogger:DevHome.$platform.$configuration.binlog"),
             ("/p:AppxPackageOutput=$appxPackageDir\DevHome-$platform.msix"),
@@ -157,35 +160,27 @@ Try {
         if (-not([string]::IsNullOrWhiteSpace($VersionOfSDK))) {
           $msbuildArgs += ("/p:DevHomeSDKVersion="+$env:sdk_version)
         }
+        if ($BuildStep -ieq "msix") {
+          $msbuildArgs += ("/p:IgnoreZipPackages=true")
+        }
 
         & $msbuildPath $msbuildArgs
+
         if (-not($IsAzurePipelineBuild) -And $isAdmin) {
           Invoke-SignPackage "$appxPackageDir\DevHome-$platform.msix"
         }
       }
     }
 
+    # reset version file back to original values
+    $cppHeader = (Join-Path $env:Build_RootDirectory "build\cppversion\version.h")
+    $updatebinverpath = (Join-Path $env:Build_RootDirectory "build\scripts\update-binver.ps1")
+    & $updatebinverpath -TargetFile $cppHeader -BuildVersion "1.0.0.0"
+
     # Reset the appxmanifest to prevent unnecessary code changes
     $appxmanifest = [System.Xml.Linq.XDocument]::Load($appxmanifestPath)
     $appxmanifest.Root.Element($xIdentity).Attribute("Version").Value = "0.0.0.0"
-    $appxmanifest.Root.Element($xIdentity).Attribute("Name").Value = "Microsoft.Windows.DevHome.Dev"
-    $appxmanifest.Root.Element($xProperties).Element($xDisplayName).Value = "Dev Home (Dev)"
-    $appxmanifest.Root.Element($xApplications).Element($xApplication).Element($uapVisualElements).Attribute("DisplayName").Value = "ms-resource:AppDisplayNameDev"
-    $extensions = $appxmanifest.Root.Element($xApplications).Element($xApplication).Element($xExtensions).Elements($uapExtension)
-    foreach ($extension in $extensions) {
-      if ($extension.Attribute("Category").Value -eq "windows.appExtension") {
-        $appExtension = $extension.Element($uapAppExtension)
-        switch ($appExtension.Attribute("Name").Value) {
-          "com.microsoft.devhome" {
-            $appExtension.Attribute("DisplayName").Value = "ms-resource:AppDisplayNameDev"
-          }
-          "com.microsoft.windows.widgets" {
-            $appExtension.Attribute("DisplayName").Value = "ms-resource:WidgetProviderDisplayNameDev"
-          }
-        }
-      }
-    }
-    $appxmanifest.Save($appxmanifestPath)
+    Write-XmlDocumentToFile -xmlDocument $appxmanifest -filePath $appxmanifestPath
   }
 
   if (($BuildStep -ieq "stubpackages")) {

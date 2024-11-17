@@ -25,9 +25,19 @@ public class AppManagementTaskGroup : ISetupTaskGroup
         _appManagementReviewViewModel = appManagementReviewViewModel;
     }
 
-    public IEnumerable<ISetupTask> SetupTasks => _packageProvider.SelectedPackages.Select(sp => sp.InstallPackageTask);
+    public IEnumerable<ISetupTask> SetupTasks => _packageProvider.SelectedPackages
+        .Where(sp => sp.CanInstall)
+        .Select(sp => sp.InstallPackageTask);
+
+    public IEnumerable<ISetupTask> DSCTasks => _packageProvider.SelectedPackages
+        .Select(sp => sp.InstallPackageTask);
 
     public SetupPageViewModelBase GetSetupPageViewModel() => _appManagementViewModel;
 
     public ReviewTabViewModelBase GetReviewTabViewModel() => _appManagementReviewViewModel;
+
+    public void HandleSearchQuery(string query)
+    {
+        _appManagementViewModel.PerformSearch(query);
+    }
 }

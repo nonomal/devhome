@@ -1,10 +1,12 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using DevHome.SetupFlow.Common.Exceptions;
+using DevHome.Services.DesiredStateConfiguration.Exceptions;
+using DevHome.Services.WindowsPackageManager.Exceptions;
 using DevHome.SetupFlow.Models;
 using DevHome.SetupFlow.Services;
 using Microsoft.Management.Configuration;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Win32.Foundation;
 
 namespace DevHome.SetupFlow.ViewModels;
@@ -28,6 +30,7 @@ public class ConfigurationUnitResultViewModel
     {
         _stringResource = stringResource;
         _unitResult = unitResult;
+        SetName();
     }
 
     public string Title => BuildTitle();
@@ -41,6 +44,50 @@ public class ConfigurationUnitResultViewModel
     public bool IsError => !IsSkipped && _unitResult.HResult != HRESULT.S_OK;
 
     public bool IsSuccess => _unitResult.HResult == HRESULT.S_OK;
+
+    public bool IsCloneRepoUnit => string.Equals(_unitResult.Type, "GitClone", System.StringComparison.OrdinalIgnoreCase);
+
+    public bool IsPrivateRepo => false;
+
+    public string Name { get; private set; }
+
+    public BitmapImage StatusSymbolIcon { get; set; }
+
+    private void SetName()
+    {
+        // Get either Git repo name for if this is a repo clone request or package name for package install request.
+        // We add into Id in ConfigurationFileBuilder.
+        if (!string.IsNullOrEmpty(_unitResult.Id))
+        {
+            if (IsCloneRepoUnit)
+            {
+                var start = ConfigurationFileBuilder.RepoNamePrefix.Length;
+                var descriptionParts = _unitResult.Id.Substring(start).Split(ConfigurationFileBuilder.RepoNameSuffix);
+                Name = descriptionParts[0];
+            }
+            else
+            {
+                var descriptionParts = _unitResult.Id.Split(ConfigurationFileBuilder.PackageNameSeparator);
+
+                if (descriptionParts.Length > 1)
+                {
+                    Name = descriptionParts[1];
+                }
+                else
+                {
+                    Name = descriptionParts[0];
+                }
+            }
+        }
+        else if (!string.IsNullOrEmpty(_unitResult.UnitDescription))
+        {
+            Name = _unitResult.UnitDescription;
+        }
+        else
+        {
+            Name = "<No Data>";
+        }
+    }
 
     private string GetApplyResult()
     {
@@ -82,11 +129,11 @@ public class ConfigurationUnitResultViewModel
         var resultCode = _unitResult.HResult;
         switch (resultCode)
         {
-            case WinGetConfigurationException.WingetConfigErrorManuallySkipped:
+            case ConfigurationException.WingetConfigErrorManuallySkipped:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitManuallySkipped);
-            case WinGetConfigurationException.WingetConfigErrorDependencyUnsatisfied:
+            case ConfigurationException.WingetConfigErrorDependencyUnsatisfied:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitNotRunDueToDependency);
-            case WinGetConfigurationException.WingetConfigErrorAssertionFailed:
+            case ConfigurationException.WingetConfigErrorAssertionFailed:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitNotRunDueToFailedAssert);
         }
 
@@ -99,37 +146,37 @@ public class ConfigurationUnitResultViewModel
         var resultCode = _unitResult.HResult;
         switch (resultCode)
         {
-            case WinGetConfigurationException.WingetConfigErrorDuplicateIdentifier:
+            case ConfigurationException.WingetConfigErrorDuplicateIdentifier:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitHasDuplicateIdentifier, _unitResult.Id);
-            case WinGetConfigurationException.WingetConfigErrorMissingDependency:
+            case ConfigurationException.WingetConfigErrorMissingDependency:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitHasMissingDependency, _unitResult.Details);
-            case WinGetConfigurationException.WingetConfigErrorAssertionFailed:
+            case ConfigurationException.WingetConfigErrorAssertionFailed:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitAssertHadNegativeResult);
-            case WinGetConfigurationException.WinGetConfigUnitNotFound:
+            case ConfigurationException.WinGetConfigUnitNotFound:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitNotFoundInModule);
-            case WinGetConfigurationException.WinGetConfigUnitNotFoundRepository:
+            case ConfigurationException.WinGetConfigUnitNotFoundRepository:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitNotFound);
-            case WinGetConfigurationException.WinGetConfigUnitMultipleMatches:
+            case ConfigurationException.WinGetConfigUnitMultipleMatches:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitMultipleMatches);
-            case WinGetConfigurationException.WinGetConfigUnitInvokeGet:
+            case ConfigurationException.WinGetConfigUnitInvokeGet:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitFailedDuringGet);
-            case WinGetConfigurationException.WinGetConfigUnitInvokeTest:
+            case ConfigurationException.WinGetConfigUnitInvokeTest:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitFailedDuringTest);
-            case WinGetConfigurationException.WinGetConfigUnitInvokeSet:
+            case ConfigurationException.WinGetConfigUnitInvokeSet:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitFailedDuringSet);
-            case WinGetConfigurationException.WinGetConfigUnitModuleConflict:
+            case ConfigurationException.WinGetConfigUnitModuleConflict:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitModuleConflict);
-            case WinGetConfigurationException.WinGetConfigUnitImportModule:
+            case ConfigurationException.WinGetConfigUnitImportModule:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitModuleImportFailed);
-            case WinGetConfigurationException.WinGetConfigUnitInvokeInvalidResult:
+            case ConfigurationException.WinGetConfigUnitInvokeInvalidResult:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitReturnedInvalidResult);
-            case WinGetConfigurationException.WingetConfigErrorManuallySkipped:
+            case ConfigurationException.WingetConfigErrorManuallySkipped:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitManuallySkipped);
-            case WinGetConfigurationException.WingetConfigErrorDependencyUnsatisfied:
+            case ConfigurationException.WingetConfigErrorDependencyUnsatisfied:
                 return _stringResource.GetLocalized(StringResourceKey.ConfigurationUnitNotRunDueToDependency);
-            case WinGetConfigurationException.WinGetConfigUnitSettingConfigRoot:
+            case ConfigurationException.WinGetConfigUnitSettingConfigRoot:
                 return _stringResource.GetLocalized(StringResourceKey.WinGetConfigUnitSettingConfigRoot);
-            case WinGetConfigurationException.WinGetConfigUnitImportModuleAdmin:
+            case ConfigurationException.WinGetConfigUnitImportModuleAdmin:
                 return _stringResource.GetLocalized(StringResourceKey.WinGetConfigUnitImportModuleAdmin);
         }
 
@@ -163,17 +210,17 @@ public class ConfigurationUnitResultViewModel
         // Code reference: https://github.com/microsoft/winget-cli/blob/master/src/AppInstallerCLICore/Workflows/ConfigurationFlow.cpp
         switch (_unitResult.HResult)
         {
-            case WinGetConfigurationException.WingetConfigErrorDuplicateIdentifier:
-            case WinGetConfigurationException.WingetConfigErrorMissingDependency:
-            case WinGetConfigurationException.WingetConfigErrorAssertionFailed:
-            case WinGetConfigurationException.WinGetConfigUnitNotFound:
-            case WinGetConfigurationException.WinGetConfigUnitNotFoundRepository:
-            case WinGetConfigurationException.WinGetConfigUnitMultipleMatches:
-            case WinGetConfigurationException.WinGetConfigUnitModuleConflict:
-            case WinGetConfigurationException.WinGetConfigUnitImportModule:
-            case WinGetConfigurationException.WinGetConfigUnitInvokeInvalidResult:
-            case WinGetConfigurationException.WinGetConfigUnitSettingConfigRoot:
-            case WinGetConfigurationException.WinGetConfigUnitImportModuleAdmin:
+            case ConfigurationException.WingetConfigErrorDuplicateIdentifier:
+            case ConfigurationException.WingetConfigErrorMissingDependency:
+            case ConfigurationException.WingetConfigErrorAssertionFailed:
+            case ConfigurationException.WinGetConfigUnitNotFound:
+            case ConfigurationException.WinGetConfigUnitNotFoundRepository:
+            case ConfigurationException.WinGetConfigUnitMultipleMatches:
+            case ConfigurationException.WinGetConfigUnitModuleConflict:
+            case ConfigurationException.WinGetConfigUnitImportModule:
+            case ConfigurationException.WinGetConfigUnitInvokeInvalidResult:
+            case ConfigurationException.WinGetConfigUnitSettingConfigRoot:
+            case ConfigurationException.WinGetConfigUnitImportModuleAdmin:
                 return string.Empty;
             default:
                 return _unitResult.ErrorDescription;

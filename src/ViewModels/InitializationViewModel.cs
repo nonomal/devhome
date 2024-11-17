@@ -3,95 +3,65 @@
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using DevHome.Common.Extensions;
-using DevHome.Common.Services;
+using DevHome.Common.Helpers;
 using DevHome.Contracts.Services;
 using DevHome.Dashboard.Services;
-using DevHome.Logging;
-using DevHome.Services;
+using DevHome.Services.Core.Contracts;
+using DevHome.Telemetry;
+using DevHome.TelemetryEvents;
 using DevHome.Views;
 using Microsoft.UI.Xaml;
+using Serilog;
 
 namespace DevHome.ViewModels;
 
 public class InitializationViewModel : ObservableObject
 {
-    private readonly IThemeSelectorService _themeSelector;
-    private readonly IWidgetHostingService _widgetHostingService;
-    private readonly IAppInstallManagerService _appInstallManagerService;
-    private readonly IPackageDeploymentService _packageDeploymentService;
+    private readonly ILogger _log = Log.ForContext("SourceContext", nameof(InitializationViewModel));
 
-#if CANARY_BUILD
-    private const string GitHubExtensionStorePackageId = "9N806ZKPW85R";
-    private const string GitHubExtensionPackageFamilyName = "Microsoft.Windows.DevHomeGitHubExtension.Canary_8wekyb3d8bbwe";
-#elif STABLE_BUILD
-    private const string GitHubExtensionStorePackageId = "9NZCC27PR6N6";
-    private const string GitHubExtensionPackageFamilyName = "Microsoft.Windows.DevHomeGitHubExtension_8wekyb3d8bbwe";
-#else
-    private const string GitHubExtensionStorePackageId = "";
-    private const string GitHubExtensionPackageFamilyName = "";
-#endif
+    private readonly IThemeSelectorService _themeSelector;
+    private readonly IWidgetServiceService _widgetServiceService;
 
     public InitializationViewModel(
         IThemeSelectorService themeSelector,
-        IWidgetHostingService widgetHostingService,
-        IAppInstallManagerService appInstallManagerService,
-        IPackageDeploymentService packageDeploymentService)
+        IWidgetServiceService widgetServiceService)
     {
         _themeSelector = themeSelector;
-        _widgetHostingService = widgetHostingService;
-        _appInstallManagerService = appInstallManagerService;
-        _packageDeploymentService = packageDeploymentService;
+        _widgetServiceService = widgetServiceService;
     }
 
     public async void OnPageLoaded()
     {
+        TelemetryFactory.Get<ITelemetry>().Log("DevHome_Initialization_Started_Event", LogLevel.Critical, new DevHomeInitializationStartedEvent());
+        _log.Information("Dev Home Initialization starting.");
+
         // Install the widget service if we're on Windows 10 and it's not already installed.
         try
         {
-            if (_widgetHostingService.CheckForWidgetServiceAsync())
+            var widgetStatus = _widgetServiceService.GetWidgetServiceState();
+            if (widgetStatus != WidgetServiceService.WidgetServiceStates.NotAtMinVersion)
             {
-                GlobalLog.Logger?.ReportInfo("InitializationViewModel", "Skipping installing WidgetService, already installed.");
+                _log.Information("Skipping installing WidgetService, already installed.");
             }
             else
             {
-                if (_widgetHostingService.GetWidgetServiceState() == WidgetHostingService.WidgetServiceStates.HasStoreWidgetServiceNoOrBadVersion)
+                if (!RuntimeHelper.IsOnWindows11)
                 {
                     // We're on Windows 10 and don't have the widget service, try to install it.
-                    await _widgetHostingService.TryInstallingWidgetService();
+                    await _widgetServiceService.TryInstallingWidgetService();
                 }
             }
         }
         catch (Exception ex)
         {
-            GlobalLog.Logger?.ReportInfo("InitializationViewModel", "Installing WidgetService failed: ", ex);
-        }
-
-        // Install the DevHomeGitHubExtension, unless it's already installed or a dev build is running.
-        if (string.IsNullOrEmpty(GitHubExtensionStorePackageId) || HasDevHomeGitHubExtensionInstalled())
-        {
-            GlobalLog.Logger?.ReportInfo("InitializationViewModel", "Skipping installing DevHomeGitHubExtension.");
-        }
-        else
-        {
-            try
-            {
-                GlobalLog.Logger?.ReportInfo("InitializationViewModel", "Installing DevHomeGitHubExtension...");
-                await _appInstallManagerService.TryInstallPackageAsync(GitHubExtensionStorePackageId);
-            }
-            catch (Exception ex)
-            {
-                GlobalLog.Logger?.ReportInfo("InitializationViewModel", "Installing DevHomeGitHubExtension failed: ", ex);
-            }
+            _log.Information(ex, "Installing WidgetService failed: ");
         }
 
         App.MainWindow.Content = Application.Current.GetService<ShellPage>();
 
         _themeSelector.SetRequestedTheme();
-    }
 
-    private bool HasDevHomeGitHubExtensionInstalled()
-    {
-        var packages = _packageDeploymentService.FindPackagesForCurrentUser(GitHubExtensionPackageFamilyName);
-        return packages.Any();
+        TelemetryFactory.Get<ITelemetry>().Log("DevHome_Initialization_Ended_Event", LogLevel.Critical, new DevHomeInitializationEndedEvent());
+        _log.Information("Dev Home Initialization ended.");
     }
 }

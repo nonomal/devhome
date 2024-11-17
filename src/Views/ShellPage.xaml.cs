@@ -5,7 +5,6 @@ using DevHome.Common.Extensions;
 using DevHome.Common.Helpers;
 using DevHome.Common.Models;
 using DevHome.Common.Services;
-using DevHome.Settings.ViewModels;
 using DevHome.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -17,10 +16,7 @@ namespace DevHome.Views;
 
 public sealed partial class ShellPage : Page
 {
-    public ShellViewModel ViewModel
-    {
-        get;
-    }
+    public ShellViewModel ViewModel { get; }
 
     public ShellPage(ShellViewModel viewModel)
     {
@@ -42,7 +38,7 @@ public sealed partial class ShellPage : Page
         PointerPressed += OnPointerPressed;
     }
 
-    private async void OnLoaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private void OnLoaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
         TitleBarHelper.UpdateTitleBar(App.MainWindow, ActualTheme);
 
@@ -51,7 +47,7 @@ public sealed partial class ShellPage : Page
         KeyboardAccelerators.Add(BuildKeyboardAccelerator(VirtualKey.Right, VirtualKeyModifiers.Menu));
         KeyboardAccelerators.Add(BuildKeyboardAccelerator(VirtualKey.GoForward));
 
-        await ViewModel.OnLoaded();
+        ViewModel.OnLoaded();
     }
 
     private void OnActualThemeChanged(FrameworkElement sender, object args)
@@ -59,6 +55,8 @@ public sealed partial class ShellPage : Page
         // Update the title bar if the system theme changes.
         TitleBarHelper.UpdateTitleBar(App.MainWindow, ActualTheme);
         AppTitleBar.Repaint();
+
+        ViewModel.NotifyActualThemeChanged();
     }
 
     private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)
@@ -150,12 +148,12 @@ public sealed partial class ShellPage : Page
 
     private void UpdateNavigationMenuItems()
     {
-        var expVM = App.Current.GetService<ExperimentalFeaturesViewModel>();
+        var expService = App.Current.GetService<IExperimentationService>();
         foreach (var group in App.NavConfig.NavMenu.Groups)
         {
             foreach (var tool in group.Tools)
             {
-                var expFeature = expVM.ExperimentalFeatures.FirstOrDefault(x => x.Id == tool.ExperimentalFeatureIdentity);
+                var expFeature = expService.ExperimentalFeatures.FirstOrDefault(x => x.Id == tool.ExperimentalFeatureIdentity);
 
                 var navigationViewItemString = $@"
                     <NavigationViewItem
@@ -167,10 +165,10 @@ public sealed partial class ShellPage : Page
                         helpers:NavigationHelper.NavigateTo=""{tool.ViewModelFullName}""
                         AutomationProperties.AutomationId=""{tool.Identity}"">
                         <NavigationViewItem.Icon>
-                            <FontIcon FontFamily=""{{StaticResource SymbolThemeFontFamily}}"" Glyph=""&#x{tool.Icon};""/>
+                            <FontIcon FontFamily=""{{StaticResource {tool.IconFontFamily}}}"" Glyph=""&#x{tool.Icon};""/>
                         </NavigationViewItem.Icon>
                     </NavigationViewItem>";
-                NavigationViewItem navigationViewItem = (NavigationViewItem)XamlReader.Load(navigationViewItemString);
+                var navigationViewItem = (NavigationViewItem)XamlReader.Load(navigationViewItemString);
 
                 if (expFeature != null)
                 {

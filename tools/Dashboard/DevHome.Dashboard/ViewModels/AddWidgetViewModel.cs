@@ -3,16 +3,18 @@
 
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using DevHome.Contracts.Services;
+using DevHome.Dashboard.ComSafeWidgetObjects;
 using DevHome.Dashboard.Services;
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.Windows.Widgets.Hosts;
 
 namespace DevHome.Dashboard.ViewModels;
 
 public partial class AddWidgetViewModel : ObservableObject
 {
     private readonly IWidgetScreenshotService _widgetScreenshotService;
+    private readonly IThemeSelectorService _themeSelectorService;
 
     [ObservableProperty]
     private string _widgetDisplayTitle;
@@ -26,21 +28,23 @@ public partial class AddWidgetViewModel : ObservableObject
     [ObservableProperty]
     private bool _pinButtonVisibility;
 
-    public AddWidgetViewModel(IWidgetScreenshotService widgetScreenshotService)
+    private ComSafeWidgetDefinition _selectedWidgetDefinition;
+
+    public AddWidgetViewModel(
+        IWidgetScreenshotService widgetScreenshotService,
+        IThemeSelectorService themeSelectorService)
     {
         _widgetScreenshotService = widgetScreenshotService;
+        _themeSelectorService = themeSelectorService;
     }
 
-    public async Task SetWidgetDefinition(WidgetDefinition selectedWidgetDefinition, ElementTheme actualTheme)
+    public async Task SetWidgetDefinition(ComSafeWidgetDefinition selectedWidgetDefinition)
     {
-        var bitmap = await _widgetScreenshotService.GetScreenshotFromCache(selectedWidgetDefinition, actualTheme);
+        _selectedWidgetDefinition = selectedWidgetDefinition;
 
         WidgetDisplayTitle = selectedWidgetDefinition.DisplayTitle;
-        WidgetProviderDisplayTitle = selectedWidgetDefinition.ProviderDefinition.DisplayName;
-        WidgetScreenshot = new ImageBrush
-        {
-            ImageSource = bitmap,
-        };
+        WidgetProviderDisplayTitle = selectedWidgetDefinition.ProviderDefinitionDisplayName;
+        WidgetScreenshot = await _widgetScreenshotService.GetBrushForWidgetScreenshotAsync(selectedWidgetDefinition, _themeSelectorService.GetActualTheme());
         PinButtonVisibility = true;
     }
 
@@ -50,5 +54,17 @@ public partial class AddWidgetViewModel : ObservableObject
         WidgetProviderDisplayTitle = string.Empty;
         WidgetScreenshot = null;
         PinButtonVisibility = false;
+        _selectedWidgetDefinition = null;
+    }
+
+    [RelayCommand]
+    private async Task UpdateThemeAsync()
+    {
+        if (_selectedWidgetDefinition != null)
+        {
+            // Update the preview image for the selected widget.
+            var theme = _themeSelectorService.GetActualTheme();
+            WidgetScreenshot = await _widgetScreenshotService.GetBrushForWidgetScreenshotAsync(_selectedWidgetDefinition, theme);
+        }
     }
 }

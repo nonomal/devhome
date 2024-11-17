@@ -1,5 +1,9 @@
 # This script unstubs the telemetry at build time and replaces the stubbed file with a reference internal nuget package
 
+#
+# Unstub managed telemetry
+#
+
 Remove-Item "$($PSScriptRoot)\..\..\telemetry\DevHome.Telemetry\TelemetryEventSource.cs"
 
 $projFile = "$($PSScriptRoot)\..\..\telemetry\DevHome.Telemetry\DevHome.Telemetry.csproj"

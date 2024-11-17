@@ -11,23 +11,33 @@ using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.WinUI;
 using DevHome.Common.Extensions;
 using DevHome.Common.Services;
-using DevHome.ExtensionLibrary.Helpers;
-using DevHome.Settings.ViewModels;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.DevHome.SDK;
+using Serilog;
 using Windows.ApplicationModel;
 using Windows.Data.Json;
 using Windows.Storage;
-using Windows.System;
+using static DevHome.Common.Helpers.CommonConstants;
 
 namespace DevHome.ExtensionLibrary.ViewModels;
 
 public partial class ExtensionLibraryViewModel : ObservableObject
 {
-    private readonly string devHomeProductId = "9N8MHTPHNGVV";
+    private readonly ILogger _log = Log.ForContext("SourceContext", nameof(ExtensionLibraryViewModel));
 
-    private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
+    private const string DevHomeProductId = "9N8MHTPHNGVV";
+
     private readonly IExtensionService _extensionService;
+    private readonly DispatcherQueue _dispatcherQueue;
+
+    // All internal Dev Home extensions that should allow users to enable/disable them, should add
+    // their class Ids to this set.
+    private readonly HashSet<string> _internalClassIdsToBeShownInExtensionsPage =
+    [
+        HyperVExtensionClassId,
+        WSLExtensionClassId,
+    ];
 
     public ObservableCollection<StorePackageViewModel> StorePackagesList { get; set; }
 
@@ -36,13 +46,10 @@ public partial class ExtensionLibraryViewModel : ObservableObject
     [ObservableProperty]
     private bool _shouldShowStoreError = false;
 
-    public ExtensionLibraryViewModel(IExtensionService extensionService)
+    public ExtensionLibraryViewModel(IExtensionService extensionService, DispatcherQueue dispatcherQueue)
     {
-        _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _extensionService = extensionService;
-
-        extensionService.OnExtensionsChanged -= OnExtensionsChanged;
-        extensionService.OnExtensionsChanged += OnExtensionsChanged;
+        _dispatcherQueue = dispatcherQueue;
 
         StorePackagesList = new();
         InstalledPackagesList = new();
@@ -51,44 +58,61 @@ public partial class ExtensionLibraryViewModel : ObservableObject
     [RelayCommand]
     public async Task GetUpdatesButtonAsync()
     {
-        await Launcher.LaunchUriAsync(new("ms-windows-store://downloadsandupdates"));
+        await Windows.System.Launcher.LaunchUriAsync(new("ms-windows-store://downloadsandupdates"));
     }
 
     [RelayCommand]
     public async Task LoadedAsync()
     {
-        await GetInstalledExtensionsAsync();
+        await GetInstalledPackagesAndExtensionsAsync();
         GetAvailablePackages();
+
+        if (_extensionService != null)
+        {
+            _extensionService.OnExtensionsChanged -= OnExtensionsChanged;
+            _extensionService.OnExtensionsChanged += OnExtensionsChanged;
+        }
+    }
+
+    [RelayCommand]
+    public void Unloaded()
+    {
+        if (_extensionService != null)
+        {
+            _extensionService.OnExtensionsChanged -= OnExtensionsChanged;
+        }
     }
 
     private async void OnExtensionsChanged(object? sender, EventArgs e)
     {
-        await _dispatcher.EnqueueAsync(async () =>
+        await _dispatcherQueue.EnqueueAsync(async () =>
         {
             ShouldShowStoreError = false;
-            await GetInstalledExtensionsAsync();
+            await GetInstalledPackagesAndExtensionsAsync();
             GetAvailablePackages();
         });
     }
 
-    private async Task GetInstalledExtensionsAsync()
+    private async Task GetInstalledPackagesAndExtensionsAsync()
     {
         var extensionWrappers = await _extensionService.GetInstalledExtensionsAsync(true);
 
         InstalledPackagesList.Clear();
 
-        extensionWrappers = extensionWrappers.OrderBy(extensionWrapper => extensionWrapper.Name);
+        extensionWrappers = extensionWrappers.OrderBy(extensionWrapper => extensionWrapper.PackageDisplayName);
 
         foreach (var extensionWrapper in extensionWrappers)
         {
-            // Don't show self as an extension.
-            if (Package.Current.Id.FullName == extensionWrapper.PackageFullName)
+            // Don't show self as an extension unless internal extension is allowed to be enabled/disabled in the
+            // extensions page.
+            if (Package.Current.Id.FullName == extensionWrapper.PackageFullName &&
+                !_internalClassIdsToBeShownInExtensionsPage.Contains(extensionWrapper.ExtensionClassId))
             {
                 continue;
             }
 
             var hasSettingsProvider = extensionWrapper.HasProviderType(ProviderType.Settings);
-            var extension = new InstalledExtensionViewModel(extensionWrapper.Name, extensionWrapper.ExtensionUniqueId, hasSettingsProvider);
+            var extension = new InstalledExtensionViewModel(extensionWrapper.ExtensionDisplayName, extensionWrapper.ExtensionUniqueId, hasSettingsProvider);
 
             // Each extension is shown under the package that contains it. Check if we have the package in the list
             // already and if not, create it and add it to the list of packages. Then add the extension to that
@@ -97,7 +121,7 @@ public partial class ExtensionLibraryViewModel : ObservableObject
             if (package == null)
             {
                 package = new InstalledPackageViewModel(
-                    extensionWrapper.Name,
+                    extensionWrapper.PackageDisplayName,
                     extensionWrapper.Publisher,
                     extensionWrapper.PackageFamilyName,
                     extensionWrapper.InstalledDate,
@@ -115,14 +139,14 @@ public partial class ExtensionLibraryViewModel : ObservableObject
         var packagesFileName = "extensionResult.json";
         try
         {
-            Log.Logger()?.ReportInfo("ExtensionLibraryViewModel", $"Get packages file '{packagesFileName}'");
+            _log.Information($"Get packages file '{packagesFileName}'");
             var uri = new Uri($"ms-appx:///DevHome.ExtensionLibrary/Assets/{packagesFileName}");
             var file = await StorageFile.GetFileFromApplicationUriAsync(uri).AsTask().ConfigureAwait(false);
             packagesFileContents = await FileIO.ReadTextAsync(file);
         }
         catch (Exception ex)
         {
-            Log.Logger()?.ReportError("ExtensionLibraryViewModel", "Error retrieving packages", ex);
+            _log.Error(ex, "Error retrieving packages");
             ShouldShowStoreError = true;
         }
 
@@ -136,7 +160,7 @@ public partial class ExtensionLibraryViewModel : ObservableObject
         var storeData = await GetStoreData();
         if (string.IsNullOrEmpty(storeData))
         {
-            Log.Logger()?.ReportError("ExtensionLibraryViewModel", "No package data found");
+            _log.Error("No package data found");
             ShouldShowStoreError = true;
             return;
         }
@@ -153,7 +177,7 @@ public partial class ExtensionLibraryViewModel : ObservableObject
                 var productId = productObj.GetNamedString("ProductId");
 
                 // Don't show self as available.
-                if (productId == devHomeProductId)
+                if (productId == DevHomeProductId)
                 {
                     continue;
                 }
@@ -178,7 +202,7 @@ public partial class ExtensionLibraryViewModel : ObservableObject
                     continue;
                 }
 
-                Log.Logger()?.ReportError("ExtensionLibraryViewModel", $"Found package: {productId}, {packageFamilyName}");
+                _log.Information($"Found package: {productId}, {packageFamilyName}");
                 var storePackage = new StorePackageViewModel(productId, title, publisher, packageFamilyName);
                 tempStorePackagesList.Add(storePackage);
             }
@@ -208,6 +232,6 @@ public partial class ExtensionLibraryViewModel : ObservableObject
     public void SendFeedbackClick()
     {
         var navigationService = Application.Current.GetService<INavigationService>();
-        _ = navigationService.NavigateTo(typeof(FeedbackViewModel).FullName!);
+        _ = navigationService.NavigateTo(KnownPageKeys.Feedback);
     }
 }

@@ -12,14 +12,12 @@ internal sealed class SystemMemoryWidget : CoreWidget, IDisposable
 {
     private static Dictionary<string, string> Templates { get; set; } = new();
 
-    private static readonly new string Name = nameof(SystemMemoryWidget);
-
-    private readonly DataManager dataManager;
+    private readonly DataManager _dataManager;
 
     public SystemMemoryWidget()
         : base()
     {
-        dataManager = new(DataType.Memory, UpdateWidget);
+        _dataManager = new(DataType.Memory, UpdateWidget);
     }
 
     private string FloatToPercentString(float value)
@@ -52,13 +50,13 @@ internal sealed class SystemMemoryWidget : CoreWidget, IDisposable
 
     public override void LoadContentData()
     {
-        Log.Logger()?.ReportDebug(Name, ShortId, "Getting Memory usage data");
+        Log.Debug("Getting Memory usage data");
 
         try
         {
             var memoryData = new JsonObject();
 
-            var currentData = dataManager.GetMemoryStats();
+            var currentData = _dataManager.GetMemoryStats();
 
             memoryData.Add("allMem", MemUlongToString(currentData.AllMem));
             memoryData.Add("usedMem", MemUlongToString(currentData.UsedMem));
@@ -77,7 +75,7 @@ internal sealed class SystemMemoryWidget : CoreWidget, IDisposable
         }
         catch (Exception e)
         {
-            Log.Logger()?.ReportError(Name, ShortId, "Error retrieving data.", e);
+            Log.Error(e, "Error retrieving data.");
             var content = new JsonObject
             {
                 { "errorMessage", e.Message },
@@ -119,7 +117,7 @@ internal sealed class SystemMemoryWidget : CoreWidget, IDisposable
             LoadContentData();
         }
 
-        dataManager.Start();
+        _dataManager.Start();
 
         LogCurrentState();
         UpdateWidget();
@@ -127,7 +125,7 @@ internal sealed class SystemMemoryWidget : CoreWidget, IDisposable
 
     protected override void SetInactive()
     {
-        dataManager.Stop();
+        _dataManager.Stop();
 
         ActivityState = WidgetActivityState.Inactive;
 
@@ -136,7 +134,7 @@ internal sealed class SystemMemoryWidget : CoreWidget, IDisposable
 
     protected override void SetDeleted()
     {
-        dataManager.Stop();
+        _dataManager.Stop();
 
         SetState(string.Empty);
         ActivityState = WidgetActivityState.Unknown;
@@ -145,6 +143,6 @@ internal sealed class SystemMemoryWidget : CoreWidget, IDisposable
 
     public void Dispose()
     {
-        dataManager.Dispose();
+        _dataManager.Dispose();
     }
 }

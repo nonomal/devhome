@@ -3,15 +3,16 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DevHome.Common.Extensions;
 using DevHome.Common.Services;
-using DevHome.SetupFlow.Common.Helpers;
+using DevHome.Services.WindowsPackageManager.Contracts;
+using DevHome.Services.WindowsPackageManager.Models;
 using DevHome.SetupFlow.Models;
 using Microsoft.Windows.DevHome.SDK;
+using Serilog;
 
 namespace DevHome.SetupFlow.Services;
 
@@ -20,9 +21,11 @@ namespace DevHome.SetupFlow.Services;
 /// </summary>
 public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSource, IDisposable
 {
+    private readonly ILogger _log = Log.ForContext("SourceContext", nameof(WinGetFeaturedApplicationsDataSource));
     private readonly IExtensionService _extensionService;
+    private readonly IAppInfoService _appInfoService;
     private readonly SemaphoreSlim _lock = new(1, 1);
-    private bool disposedValue;
+    private bool _disposedValue;
 
     /// <summary>
     /// Gets the estimated total count of catalogs from all enabled extensions.
@@ -33,10 +36,11 @@ public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSour
     /// </remarks>
     private int _estimatedCatalogCount;
 
-    public WinGetFeaturedApplicationsDataSource(IWindowsPackageManager wpm, IExtensionService extensionService)
-        : base(wpm)
+    public WinGetFeaturedApplicationsDataSource(IWinGet winget, IExtensionService extensionService, IAppInfoService appInfoService)
+        : base(winget)
     {
         _extensionService = extensionService;
+        _appInfoService = appInfoService;
     }
 
     /// <inheritdoc />
@@ -89,7 +93,7 @@ public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSour
                     }
                     catch (Exception e)
                     {
-                        Log.Logger?.ReportError(Log.Component.AppManagement, $"Error loading packages from featured applications group.", e);
+                        _log.Error(e, $"Error loading packages from featured applications group.");
                     }
                 }
             });
@@ -109,8 +113,8 @@ public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSour
     /// <returns>Package catalog, or null if no packages found or an error occurred</returns>
     private async Task<PackageCatalog> LoadCatalogAsync(IFeaturedApplicationsGroup group)
     {
-        var locale = CultureInfo.CurrentCulture.Name;
-        var groupTitle = group.GetTitle(locale);
+        var preferredLanguage = _appInfoService.UserPreferredLanguage;
+        var groupTitle = group.GetTitle(preferredLanguage);
         var appsResult = group.GetApplications();
         if (appsResult.Result.Status == ProviderOperationStatus.Success)
         {
@@ -120,18 +124,18 @@ public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSour
                 return new()
                 {
                     Name = groupTitle,
-                    Description = group.GetDescription(locale),
+                    Description = group.GetDescription(preferredLanguage),
                     Packages = packages.ToReadOnlyCollection(),
                 };
             }
             else
             {
-                Log.Logger?.ReportInfo(Log.Component.AppManagement, $"No packages found in featured applications group '{groupTitle}'");
+                _log.Information($"No packages found in featured applications group '{groupTitle}'");
             }
         }
         else
         {
-            Log.Logger?.ReportWarn(Log.Component.AppManagement, $"Failed to get featured applications group '{groupTitle}': {appsResult.Result.DiagnosticText}", appsResult.Result.ExtendedError);
+            _log.Warning($"Failed to get featured applications group '{groupTitle}': {appsResult.Result.DiagnosticText}", appsResult.Result.ExtendedError);
         }
 
         return null;
@@ -153,7 +157,7 @@ public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSour
             }
             else
             {
-                Log.Logger?.ReportWarn(Log.Component.AppManagement, $"Invalid package uri: {uriString}");
+                _log.Warning($"Invalid package uri: {uriString}");
             }
         }
 
@@ -166,14 +170,14 @@ public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSour
     /// <param name="action">Action to execute</param>
     private async Task ForEachEnabledExtensionAsync(Func<IReadOnlyList<IFeaturedApplicationsGroup>, Task> action)
     {
-        Log.Logger?.ReportInfo(Log.Component.AppManagement, "Getting featured applications from all extensions");
+        _log.Information("Getting featured applications from all extensions");
         var extensions = await _extensionService.GetInstalledExtensionsAsync(ProviderType.FeaturedApplications);
         foreach (var extension in extensions)
         {
-            var extensionName = extension.Name;
+            var extensionName = extension.PackageFamilyName;
             try
             {
-                Log.Logger?.ReportInfo(Log.Component.AppManagement, $"Getting featured applications provider from extension '{extensionName}'");
+                _log.Information($"Getting featured applications provider from extension '{extensionName}'");
                 var provider = await extension.GetProviderAsync<IFeaturedApplicationsProvider>();
                 if (provider != null)
                 {
@@ -191,36 +195,36 @@ public sealed class WinGetFeaturedApplicationsDataSource : WinGetPackageDataSour
                             groupList.Add(groups[i]);
                         }
 
-                        Log.Logger?.ReportInfo(Log.Component.AppManagement, $"Found {groups.Count} groups from extension '{extensionName}'");
+                        _log.Information($"Found {groups.Count} groups from extension '{extensionName}'");
                         await action(groupList);
                     }
                     else
                     {
-                        Log.Logger?.ReportError(Log.Component.AppManagement, $"Failed to get featured applications groups from extension '{extensionName}': {groupsResult.Result.DiagnosticText}", groupsResult.Result.ExtendedError);
+                        _log.Error(groupsResult.Result.ExtendedError, $"Failed to get featured applications groups from extension '{extensionName}': {groupsResult.Result.DiagnosticText}");
                     }
                 }
                 else
                 {
-                    Log.Logger?.ReportError(Log.Component.AppManagement, $"Failed to get featured applications provider from extension '{extensionName}'");
+                    _log.Error($"Failed to get featured applications provider from extension '{extensionName}'");
                 }
             }
             catch (Exception e)
             {
-                Log.Logger?.ReportError(Log.Component.AppManagement, $"Error loading featured applications from extension {extensionName}", e);
+                _log.Error(e, $"Error loading featured applications from extension {extensionName}");
             }
         }
     }
 
     private void Dispose(bool disposing)
     {
-        if (!disposedValue)
+        if (!_disposedValue)
         {
             if (disposing)
             {
                 _lock.Dispose();
             }
 
-            disposedValue = true;
+            _disposedValue = true;
         }
     }
 

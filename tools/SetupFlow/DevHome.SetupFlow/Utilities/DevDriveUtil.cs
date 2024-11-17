@@ -6,11 +6,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using CommunityToolkit.Common;
-using DevHome.SetupFlow.Common.Helpers;
+using Serilog;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Shell;
+using static CommunityToolkit.Common.Converters;
 
 namespace DevHome.SetupFlow.Utilities;
 
@@ -35,6 +35,10 @@ public enum InvalidCharactersKind
 /// </summary>
 public static class DevDriveUtil
 {
+    private static readonly Lazy<ILogger> _log = new(() => Serilog.Log.ForContext("SourceContext", nameof(DevDriveUtil)));
+
+    private static readonly ILogger Log = _log.Value;
+
     public static double MaxSizeForGbComboBox => 64000D;
 
     public static double MinSizeForGbComboBox => 50D;
@@ -100,7 +104,7 @@ public static class DevDriveUtil
             }
             catch (Exception ex)
             {
-                Log.Logger?.ReportError($"Unable to query for Dev Drive enablement: {ex.Message}");
+                Log.Error(ex, $"Unable to query for Dev Drive enablement: {ex.Message}");
                 return false;
             }
         }
@@ -265,7 +269,7 @@ public static class DevDriveUtil
                 if (result != 0)
                 {
                     // fallback to using community toolkit which shows this unlocalized. In the form of 50 GB, 40 TB etc.
-                    return Converters.ToFileSizeString((long)sizeInBytes);
+                    return ToFileSizeString((long)sizeInBytes);
                 }
                 else
                 {

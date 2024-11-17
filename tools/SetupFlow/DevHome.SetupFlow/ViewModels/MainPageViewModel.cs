@@ -3,19 +3,27 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DevHome.Common.Environments.Models;
+using DevHome.Common.Environments.Services;
 using DevHome.Common.Extensions;
+using DevHome.Common.Models;
+using DevHome.Common.Services;
 using DevHome.Common.TelemetryEvents;
 using DevHome.Common.TelemetryEvents.SetupFlow;
-using DevHome.SetupFlow.Common.Helpers;
+using DevHome.Services.DesiredStateConfiguration.Contracts;
+using DevHome.Services.WindowsPackageManager.Contracts;
 using DevHome.SetupFlow.Models;
 using DevHome.SetupFlow.Services;
 using DevHome.SetupFlow.TaskGroups;
 using DevHome.SetupFlow.Utilities;
 using DevHome.Telemetry;
 using Microsoft.Extensions.Hosting;
+using Serilog;
+using Windows.Storage;
 using Windows.System;
 
 namespace DevHome.SetupFlow.ViewModels;
@@ -26,11 +34,15 @@ namespace DevHome.SetupFlow.ViewModels;
 /// combinations of steps to perform. For example, only Configuration file,
 /// or a full flow with Dev Volume, Clone Repos, and App Management.
 /// </summary>
-public partial class MainPageViewModel : SetupPageViewModelBase
+public partial class MainPageViewModel : SetupPageViewModelBase, IDisposable
 {
+    private readonly ILogger _log = Log.ForContext("SourceContext", nameof(MainPageViewModel));
+
     private readonly IHost _host;
-    private readonly IWindowsPackageManager _wpm;
-    private readonly IDesiredStateConfiguration _dsc;
+    private readonly IWinGet _winget;
+    private readonly IDSC _dsc;
+    private readonly IExperimentationService _experimentationService;
+    private readonly IComputeSystemManager _computeSystemManager;
 
     public MainPageBannerViewModel BannerViewModel { get; }
 
@@ -46,6 +58,12 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     [ObservableProperty]
     private bool _showAppInstallerUpdateNotification;
 
+    private bool _disposedValue;
+
+    public string MainPageEnvironmentSetupGroupName => StringResource.GetLocalized(StringResourceKey.MainPageEnvironmentSetupGroup);
+
+    public string MainPageQuickStepsGroupName => StringResource.GetLocalized(StringResourceKey.MainPageQuickConfigurationGroup);
+
     /// <summary>
     /// Event raised when the user elects to start the setup flow.
     /// The orchestrator for the whole flow subscribes to this event to handle
@@ -56,15 +74,19 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     public MainPageViewModel(
         ISetupFlowStringResource stringResource,
         SetupFlowOrchestrator orchestrator,
-        IWindowsPackageManager wpm,
-        IDesiredStateConfiguration dsc,
+        IWinGet winget,
+        IDSC dsc,
         IHost host,
-        MainPageBannerViewModel bannerViewModel)
+        MainPageBannerViewModel bannerViewModel,
+        IExperimentationService experimentationService,
+        IComputeSystemManager computeSystemManager)
         : base(stringResource, orchestrator)
     {
         _host = host;
-        _wpm = wpm;
+        _winget = winget;
         _dsc = dsc;
+        _experimentationService = experimentationService;
+        _computeSystemManager = computeSystemManager;
 
         IsNavigationBarVisible = false;
         IsStepPage = false;
@@ -73,16 +95,50 @@ public partial class MainPageViewModel : SetupPageViewModelBase
         BannerViewModel = bannerViewModel;
     }
 
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposedValue)
+        {
+            _disposedValue = true;
+        }
+    }
+
+    // Disconnect event handler when the view model is disposed.
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    public async Task StartConfigurationFileAsync(StorageFile file)
+    {
+        _log.Information("Launching configuration file flow");
+        var configFileSetupFlow = _host.GetService<ConfigurationFileTaskGroup>();
+        if (await configFileSetupFlow.LoadFromLocalFileAsync(file))
+        {
+            _log.Information("Started flow from file activation");
+            StartSetupFlowForTaskGroups(null, "ConfigurationFile", configFileSetupFlow);
+        }
+    }
+
+    internal void StartAppManagementFlow(string query = null)
+    {
+        _log.Information("Launching app management flow");
+        var appManagementSetupFlow = _host.GetService<AppManagementTaskGroup>();
+        StartSetupFlowForTaskGroups(null, "App Activation URI", appManagementSetupFlow);
+        appManagementSetupFlow.HandleSearchQuery(query);
+    }
+
     protected async override Task OnFirstNavigateToAsync()
     {
         if (await ValidateAppInstallerAsync())
         {
-            Log.Logger?.ReportInfo($"{nameof(WindowsPackageManager)} COM Server is available. Showing package install item");
-            ShowAppInstallerUpdateNotification = await _wpm.IsUpdateAvailableAsync();
+            _log.Information($"{nameof(IWinGet)} COM Server is available. Showing package install item");
+            ShowAppInstallerUpdateNotification = await _winget.IsUpdateAvailableAsync();
         }
         else
         {
-            Log.Logger?.ReportWarn($"{nameof(WindowsPackageManager)} COM Server is not available. Package install item is hidden.");
+            _log.Warning($"{nameof(IWinGet)} COM Server is not available. Package install item is hidden.");
         }
     }
 
@@ -106,7 +162,7 @@ public partial class MainPageViewModel : SetupPageViewModelBase
 
         // Report this after setting the flow pages as that will set an ActivityId
         // we can later use to correlate with the flow termination.
-        Log.Logger?.ReportInfo($"Starting setup flow with ActivityId={Orchestrator.ActivityId}");
+        _log.Information($"Starting setup flow with ActivityId={Orchestrator.ActivityId}");
         TelemetryFactory.Get<ITelemetry>().Log(
             "MainPage_StartFlow_Event",
             LogLevel.Critical,
@@ -120,7 +176,7 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     [RelayCommand]
     private void StartSetup(string flowTitle)
     {
-        Log.Logger?.ReportInfo(Log.Component.MainPage, "Starting end-to-end setup");
+        _log.Information("Starting end-to-end setup");
         StartSetupFlowForTaskGroups(
             flowTitle,
             "EndToEnd",
@@ -130,12 +186,59 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     }
 
     /// <summary>
+    /// Starts the setup target flow for remote machines.
+    /// </summary>
+    [RelayCommand]
+    private void StartSetupForTargetEnvironment(string flowTitle)
+    {
+        _log.Information("Starting setup for target environment");
+        StartSetupFlowForTaskGroups(
+            flowTitle,
+            "SetupTargetEnvironment",
+            _host.GetService<SetupTargetTaskGroup>(),
+            _host.GetService<RepoConfigTaskGroup>(),
+            _host.GetService<AppManagementTaskGroup>());
+    }
+
+    /// <summary>
+    /// Starts the setup target flow from the environments page.
+    /// </summary>
+    public void StartSetupForTargetEnvironmentWithTelemetry(string flowTitle, string navigationAction, string originPage, ComputeSystemReviewItem item)
+    {
+        var setupTask = _host.GetService<SetupTargetTaskGroup>();
+
+        _log.Information("Starting setup for target environment from the Environments page");
+        StartSetupFlowForTaskGroups(
+            flowTitle,
+            "SetupTargetEnvironment",
+            setupTask,
+            _host.GetService<RepoConfigTaskGroup>(),
+            _host.GetService<AppManagementTaskGroup>());
+
+        TelemetryFactory.Get<ITelemetry>().Log(
+            "Setup_Environment_button_Clicked",
+            LogLevel.Measure,
+            new EnvironmentRedirectionUserEvent(navigationAction: navigationAction, originPage),
+            relatedActivityId: Orchestrator.ActivityId);
+
+        Orchestrator.GoToNextPage().GetAwaiter().GetResult();
+
+        // We add the target environment to the setup task after because the constructor flow
+        // of the setup task group sets the target environment to null on the main thread.
+        // We move it to a background thread so that there isn't a race condition with the main thread.
+        Task.Run(() =>
+        {
+            _computeSystemManager.ComputeSystemSetupItem = item;
+        });
+    }
+
+    /// <summary>
     /// Starts a setup flow that only includes repo config.
     /// </summary>
     [RelayCommand]
-    private void StartRepoConfig(string flowTitle)
+    public void StartRepoConfig(string flowTitle)
     {
-        Log.Logger?.ReportInfo(Log.Component.MainPage, "Starting flow for repo config");
+        _log.Information("Starting flow for repo config");
         StartSetupFlowForTaskGroups(
             flowTitle,
             "RepoConfig",
@@ -144,12 +247,42 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     }
 
     /// <summary>
+    /// Starts the create environment flow.
+    /// </summary>
+    [RelayCommand]
+    public void StartCreateEnvironment(string flowTitle)
+    {
+        StartCreateEnvironmentWithTelemetry(flowTitle, "StartCreationFlow", "Machine Configuration");
+    }
+
+    /// <summary>
+    /// Starts the create environment flow and logs that the create environment button has been clicked. This
+    /// can be generalized in the future so other flow can utilize it as well.
+    /// </summary>
+    public void StartCreateEnvironmentWithTelemetry(string flowTitle, string navigationAction, string originPage)
+    {
+        _log.Information("Starting flow for environment creation");
+        StartSetupFlowForTaskGroups(
+            flowTitle,
+            "CreateEnvironment",
+            _host.GetService<SelectEnvironmentProviderTaskGroup>(),
+            _host.GetService<EnvironmentCreationOptionsTaskGroup>());
+
+        // Send telemetry so we know which page in Dev Home the user clicked the create environment button.
+        TelemetryFactory.Get<ITelemetry>().Log(
+            "Create_Environment_button_Clicked",
+            LogLevel.Critical,
+            new EnvironmentRedirectionUserEvent(navigationAction: navigationAction, originPage),
+            relatedActivityId: Orchestrator.ActivityId);
+    }
+
+    /// <summary>
     /// Starts a setup flow that only includes app management.
     /// </summary>
     [RelayCommand]
     private void StartAppManagement(string flowTitle)
     {
-        Log.Logger?.ReportInfo(Log.Component.MainPage, "Starting flow for app management");
+        _log.Information("Starting flow for app management");
         StartSetupFlowForTaskGroups(flowTitle, "AppManagement", _host.GetService<AppManagementTaskGroup>());
     }
 
@@ -160,7 +293,7 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     private async Task LaunchDisksAndVolumesSettingsPageAsync()
     {
         // Critical level approved by subhasan
-        Log.Logger?.ReportInfo(Log.Component.MainPage, "Launching settings on Disks and Volumes page");
+        _log.Information("Launching settings on Disks and Volumes page");
         TelemetryFactory.Get<ITelemetry>().Log(
             "LaunchDisksAndVolumesSettingsPageTriggered",
             LogLevel.Critical,
@@ -176,11 +309,11 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     [RelayCommand]
     private async Task StartConfigurationFileAsync()
     {
-        Log.Logger?.ReportInfo(Log.Component.MainPage, "Launching configuration file flow");
+        _log.Information("Launching configuration file flow");
         var configFileSetupFlow = _host.GetService<ConfigurationFileTaskGroup>();
         if (await configFileSetupFlow.PickConfigurationFileAsync())
         {
-            Log.Logger?.ReportInfo(Log.Component.MainPage, "Starting flow for Configuration file");
+            _log.Information("Starting flow for Configuration file");
             StartSetupFlowForTaskGroups(null, "ConfigurationFile", configFileSetupFlow);
         }
     }
@@ -188,7 +321,7 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     [RelayCommand]
     private void HideAppInstallerUpdateNotification()
     {
-        Log.Logger?.ReportInfo(Log.Component.MainPage, "Hiding AppInstaller update notification");
+        _log.Information("Hiding AppInstaller update notification");
         ShowAppInstallerUpdateNotification = false;
     }
 
@@ -196,8 +329,8 @@ public partial class MainPageViewModel : SetupPageViewModelBase
     private async Task UpdateAppInstallerAsync()
     {
         HideAppInstallerUpdateNotification();
-        Log.Logger?.ReportInfo(Log.Component.MainPage, "Opening AppInstaller in the Store app");
-        await Launcher.LaunchUriAsync(new Uri($"ms-windows-store://pdp/?productid={WindowsPackageManager.AppInstallerProductId}"));
+        _log.Information("Opening AppInstaller in the Store app");
+        await Launcher.LaunchUriAsync(new Uri($"ms-windows-store://pdp/?productid={IWinGet.AppInstallerProductId}"));
     }
 
     [RelayCommand]
@@ -213,6 +346,6 @@ public partial class MainPageViewModel : SetupPageViewModelBase
 
     private async Task<bool> ValidateAppInstallerAsync()
     {
-        return EnablePackageInstallerItem = await _wpm.IsAvailableAsync();
+        return EnablePackageInstallerItem = await _winget.IsAvailableAsync();
     }
 }

@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 using System.Web;
 using DevHome.Common.Extensions;
 using DevHome.Common.Services;
+using DevHome.Common.Views;
+using DevHome.Services.Core.Contracts;
 using DevHome.Settings.ViewModels;
 using Microsoft.Management.Infrastructure;
 using Microsoft.UI.Xaml;
@@ -24,7 +26,7 @@ namespace DevHome.Settings.Views;
 /// <summary>
 /// An empty page that can be used on its own or navigated to within a Frame.
 /// </summary>
-public sealed partial class FeedbackPage : Page
+public sealed partial class FeedbackPage : ToolPage
 {
     private static readonly double ByteSizeGB = 1024 * 1024 * 1024;
     private static string wmiCPUInfo = string.Empty;
@@ -247,12 +249,12 @@ public sealed partial class FeedbackPage : Page
 
         MEMORYSTATUSEX memStatus = default;
         memStatus.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
-        PInvoke.GlobalMemoryStatusEx(out memStatus);
+        PInvoke.GlobalMemoryStatusEx(ref memStatus);
 
         var availMemKbToGb = Math.Round(memStatus.ullAvailPhys / ByteSizeGB, 2);
         var totalMemKbToGb = Math.Round(memStatus.ullTotalPhys / ByteSizeGB, 2);
 
-        var stringResource = new StringResource("DevHome.Settings/Resources");
+        var stringResource = new StringResource("DevHome.Settings.pri", "DevHome.Settings/Resources");
         return stringResource.GetLocalized("Settings_Feedback_PhysicalMemory") + ": " + totalMemKbToGb.ToString(cultures) + "GB (" + availMemKbToGb.ToString(cultures) + "GB free)";
     }
 
@@ -260,7 +262,7 @@ public sealed partial class FeedbackPage : Page
     {
         SYSTEM_INFO sysInfo;
         PInvoke.GetSystemInfo(out sysInfo);
-        var stringResource = new StringResource("DevHome.Settings/Resources");
+        var stringResource = new StringResource("DevHome.Settings.pri", "DevHome.Settings/Resources");
         return stringResource.GetLocalized("Settings_Feedback_ProcessorArchitecture") + ": " + DetermineArchitecture((int)sysInfo.Anonymous.Anonymous.wProcessorArchitecture);
     }
 
@@ -293,11 +295,11 @@ public sealed partial class FeedbackPage : Page
     {
         var extensionService = Application.Current.GetService<IExtensionService>();
         var extensions = extensionService.GetInstalledExtensionsAsync(true).Result;
-        var stringResource = new StringResource("DevHome.Settings/Resources");
+        var stringResource = new StringResource("DevHome.Settings.pri", "DevHome.Settings/Resources");
         var extensionsStr = stringResource.GetLocalized("Settings_Feedback_Extensions") + ": \n";
         foreach (var extension in extensions)
         {
-            extensionsStr += extension.PackageFullName + "\n";
+            extensionsStr += extension.PackageFullName + " (" + extension.ExtensionDisplayName + ")\n";
         }
 
         return extensionsStr;
@@ -305,7 +307,7 @@ public sealed partial class FeedbackPage : Page
 
     private string GetWidgetService()
     {
-        var stringResource = new StringResource("DevHome.Settings/Resources");
+        var stringResource = new StringResource("DevHome.Settings.pri", "DevHome.Settings/Resources");
         var widgetServiceString = stringResource.GetLocalized("Settings_Feedback_WidgetService") + ": \n";
         var packageDeploymentService = Application.Current.GetService<IPackageDeploymentService>();
 

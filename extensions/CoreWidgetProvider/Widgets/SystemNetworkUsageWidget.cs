@@ -11,22 +11,21 @@ namespace CoreWidgetProvider.Widgets;
 
 internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
 {
+    private DataManager _dataManager;
+
     private static Dictionary<string, string> Templates { get; set; } = new();
 
-    private int networkIndex;
-
-    private static readonly new string Name = nameof(SystemNetworkUsageWidget);
-
-    private readonly DataManager dataManager;
+    private int _networkIndex;
 
     public SystemNetworkUsageWidget()
         : base()
     {
-        dataManager = new(DataType.Network, UpdateWidget);
+        _dataManager = new(DataType.Network, UpdateWidget);
     }
 
     private string SpeedToString(float cpuSpeed)
     {
+        _dataManager = new(DataType.Network, UpdateWidget);
         return string.Format(CultureInfo.InvariantCulture, "{0:0.00} GHz", cpuSpeed / 1000);
     }
 
@@ -54,22 +53,22 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
 
     public override void LoadContentData()
     {
-        Log.Logger()?.ReportDebug(Name, ShortId, "Getting network Data");
+        Log.Debug("Getting network Data");
 
         try
         {
             var networkData = new JsonObject();
 
-            var currentData = dataManager.GetNetworkStats();
+            var currentData = _dataManager.GetNetworkStats();
 
-            var netName = currentData.GetNetworkName(networkIndex);
-            var networkStats = currentData.GetNetworkUsage(networkIndex);
+            var netName = currentData.GetNetworkName(_networkIndex);
+            var networkStats = currentData.GetNetworkUsage(_networkIndex);
 
             networkData.Add("networkUsage", FloatToPercentString(networkStats.Usage));
             networkData.Add("netSent", BytesToBitsPerSecString(networkStats.Sent));
             networkData.Add("netReceived", BytesToBitsPerSecString(networkStats.Received));
             networkData.Add("networkName", netName);
-            networkData.Add("netGraphUrl", currentData.CreateNetImageUrl(networkIndex));
+            networkData.Add("netGraphUrl", currentData.CreateNetImageUrl(_networkIndex));
             networkData.Add("chartHeight", ChartHelper.ChartHeight + "px");
             networkData.Add("chartWidth", ChartHelper.ChartWidth + "px");
 
@@ -78,7 +77,7 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
         }
         catch (Exception e)
         {
-            Log.Logger()?.ReportError(Name, ShortId, "Error retrieving data.", e);
+            Log.Error(e, "Error retrieving data.");
             var content = new JsonObject
             {
                 { "errorMessage", e.Message },
@@ -113,20 +112,20 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
 
     private void HandlePrevNetwork(WidgetActionInvokedArgs args)
     {
-        networkIndex = dataManager.GetNetworkStats().GetPrevNetworkIndex(networkIndex);
+        _networkIndex = _dataManager.GetNetworkStats().GetPrevNetworkIndex(_networkIndex);
         UpdateWidget();
     }
 
     private void HandleNextNetwork(WidgetActionInvokedArgs args)
     {
-        networkIndex = dataManager.GetNetworkStats().GetNextNetworkIndex(networkIndex);
+        _networkIndex = _dataManager.GetNetworkStats().GetNextNetworkIndex(_networkIndex);
         UpdateWidget();
     }
 
     public override void OnActionInvoked(WidgetActionInvokedArgs actionInvokedArgs)
     {
         var verb = GetWidgetActionForVerb(actionInvokedArgs.Verb);
-        Log.Logger()?.ReportDebug(Name, ShortId, $"ActionInvoked: {verb}");
+        Log.Debug($"ActionInvoked: {verb}");
 
         switch (verb)
         {
@@ -139,7 +138,7 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
                 break;
 
             case WidgetAction.Unknown:
-                Log.Logger()?.ReportError(Name, ShortId, $"Unknown verb: {actionInvokedArgs.Verb}");
+                Log.Error($"Unknown verb: {actionInvokedArgs.Verb}");
                 break;
         }
     }
@@ -153,7 +152,7 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
             LoadContentData();
         }
 
-        dataManager.Start();
+        _dataManager.Start();
 
         LogCurrentState();
         UpdateWidget();
@@ -161,7 +160,7 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
 
     protected override void SetInactive()
     {
-        dataManager.Stop();
+        _dataManager.Stop();
 
         ActivityState = WidgetActivityState.Inactive;
 
@@ -170,7 +169,7 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
 
     protected override void SetDeleted()
     {
-        dataManager.Stop();
+        _dataManager.Stop();
 
         SetState(string.Empty);
         ActivityState = WidgetActivityState.Unknown;
@@ -179,6 +178,6 @@ internal sealed class SystemNetworkUsageWidget : CoreWidget, IDisposable
 
     public void Dispose()
     {
-        dataManager.Dispose();
+        _dataManager.Dispose();
     }
 }

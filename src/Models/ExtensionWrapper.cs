@@ -4,6 +4,7 @@
 using System.Runtime.InteropServices;
 using DevHome.Common.Services;
 using Microsoft.Windows.DevHome.SDK;
+using Serilog;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.AppExtensions;
 using Windows.Win32;
@@ -25,13 +26,16 @@ public class ExtensionWrapper : IExtensionWrapper
         [typeof(IRepositoryProvider)] = ProviderType.Repository,
         [typeof(ISettingsProvider)] = ProviderType.Settings,
         [typeof(IFeaturedApplicationsProvider)] = ProviderType.FeaturedApplications,
+        [typeof(IComputeSystemProvider)] = ProviderType.ComputeSystem,
+        [typeof(ILocalRepositoryProvider)] = ProviderType.LocalRepository,
     };
 
     private IExtension? _extensionObject;
 
     public ExtensionWrapper(AppExtension appExtension, string classId)
     {
-        Name = appExtension.DisplayName;
+        PackageDisplayName = appExtension.Package.DisplayName;
+        ExtensionDisplayName = appExtension.DisplayName;
         PackageFullName = appExtension.Package.Id.FullName;
         PackageFamilyName = appExtension.Package.Id.FamilyName;
         ExtensionClassId = classId ?? throw new ArgumentNullException(nameof(classId));
@@ -41,40 +45,21 @@ public class ExtensionWrapper : IExtensionWrapper
         ExtensionUniqueId = appExtension.AppInfo.AppUserModelId + "!" + appExtension.Id;
     }
 
-    public string Name
-    {
-        get;
-    }
+    public string PackageDisplayName { get; }
 
-    public string PackageFullName
-    {
-        get;
-    }
+    public string ExtensionDisplayName { get; }
 
-    public string PackageFamilyName
-    {
-        get;
-    }
+    public string PackageFullName { get; }
 
-    public string ExtensionClassId
-    {
-        get;
-    }
+    public string PackageFamilyName { get; }
 
-    public string Publisher
-    {
-        get;
-    }
+    public string ExtensionClassId { get; }
 
-    public DateTimeOffset InstalledDate
-    {
-        get;
-    }
+    public string Publisher { get; }
 
-    public PackageVersion Version
-    {
-        get;
-    }
+    public DateTimeOffset InstalledDate { get; }
+
+    public PackageVersion Version { get; }
 
     /// <summary>
     /// Gets the unique id for this Dev Home extension. The unique id is a concatenation of:
@@ -85,10 +70,7 @@ public class ExtensionWrapper : IExtensionWrapper
     /// <item>The Extension Id. This is the unique identifier of the extension within the application.</item>
     /// </list>
     /// </summary>
-    public string ExtensionUniqueId
-    {
-        get;
-    }
+    public string ExtensionUniqueId { get; }
 
     public bool IsRunning()
     {
@@ -108,7 +90,9 @@ public class ExtensionWrapper : IExtensionWrapper
                 return false;
             }
 
-            throw;
+            // Getting here is unexpected; log the state to handle other errors in the future.
+            Log.Warning(e, $"Unexpected result in IsRunning(): {e.Message}");
+            return false;
         }
 
         return true;
@@ -126,11 +110,12 @@ public class ExtensionWrapper : IExtensionWrapper
                     try
                     {
                         var hr = PInvoke.CoCreateInstance(Guid.Parse(ExtensionClassId), null, CLSCTX.CLSCTX_LOCAL_SERVER, typeof(IExtension).GUID, out var extensionObj);
-                        extensionPtr = Marshal.GetIUnknownForObject(extensionObj);
                         if (hr < 0)
                         {
                             Marshal.ThrowExceptionForHR(hr);
                         }
+
+                        extensionPtr = Marshal.GetIUnknownForObject(extensionObj);
 
                         _extensionObject = MarshalInterface<IExtension>.FromAbi(extensionPtr);
                     }
@@ -180,6 +165,24 @@ public class ExtensionWrapper : IExtensionWrapper
         await StartExtensionAsync();
 
         return GetExtensionObject()?.GetProvider(_providerTypeMap[typeof(T)]) as T;
+    }
+
+    public async Task<IEnumerable<T>> GetListOfProvidersAsync<T>()
+        where T : class
+    {
+        await StartExtensionAsync();
+
+        var supportedProviders = GetExtensionObject()?.GetProvider(_providerTypeMap[typeof(T)]);
+        if (supportedProviders is IEnumerable<T> multipleProvidersSupported)
+        {
+            return multipleProvidersSupported;
+        }
+        else if (supportedProviders is T singleProviderSupported)
+        {
+            return new List<T>() { singleProviderSupported };
+        }
+
+        return Enumerable.Empty<T>();
     }
 
     public void AddProviderType(ProviderType providerType)

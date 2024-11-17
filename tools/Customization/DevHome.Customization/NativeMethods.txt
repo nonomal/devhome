@@ -1,0 +1,4 @@
+﻿SHGetSetSettings
+ReadCabinetState
+WriteCabinetState
+CoCreateInstance
